@@ -21,6 +21,7 @@ const NODE_NAME = `WAYLINE [${HOSTNAME}]`;
 const discoveredPeers = new Map(); // id -> { id, name, ip, port, lastSeen, ws }
 const peerSockets = new Map();     // id -> ws
 const clientSockets = new Set();   // Set of browser UI clients
+const registeredClients = new Map(); // ws -> { ws, nodeId, nodeName, ip, lastSeen }
 const seenPackets = new Set();
 
 // Calculate subnet broadcast address from IP and netmask
@@ -137,37 +138,53 @@ wss.on('connection', (ws, req) => {
 
   if (clientType === 'client') {
     // Local browser UI
-    clientSockets.add(ws);
-    console.log(`[WAYLINE] Browser UI connected (${clientSockets.size} active)`);
+    const clientIp = req.socket.remoteAddress?.replace('::ffff:', '') || '127.0.0.1';
+    const clientNodeId = url.searchParams.get('nodeId') || ('client_' + Math.random().toString(36).substring(2, 8));
+    const clientNodeName = url.searchParams.get('nodeName') || 'Nearby User';
 
-    // Send initial status and known peers
+    const clientInfo = {
+      ws,
+      nodeId: clientNodeId,
+      nodeName: clientNodeName,
+      ip: clientIp,
+      lastSeen: Date.now()
+    };
+
+    registeredClients.set(ws, clientInfo);
+    clientSockets.add(ws);
+    console.log(`[WAYLINE] Browser UI connected: ${clientInfo.nodeName} (${clientInfo.nodeId}) [${clientSockets.size} active]`);
+
+    // Send initial status to this client
     ws.send(JSON.stringify({
       type: 'NODE_STATUS',
       nodeId: NODE_ID,
       nodeName: NODE_NAME,
-      listeningAddress: `${LOCAL_IP}:${HTTP_PORT}`,
-      peers: Array.from(discoveredPeers.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        address: `${p.ip}:${p.port}`,
-        status: peerSockets.has(p.id) ? 'CONNECTED' : 'DISCOVERED',
-        lastSeen: p.lastSeen,
-        isRelay: true
-      }))
+      listeningAddress: `${LOCAL_IP}:${HTTP_PORT}`
     }));
+
+    // Broadcast updated peer list to all clients so they immediately see each other!
+    broadcastPeersToClients();
 
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
-        handleClientMessage(msg, ws);
+        if (msg.type === 'CLIENT_REGISTER') {
+          if (msg.nodeId) clientInfo.nodeId = msg.nodeId;
+          if (msg.nodeName) clientInfo.nodeName = msg.nodeName;
+          broadcastPeersToClients();
+        } else {
+          handleClientMessage(msg, ws);
+        }
       } catch (err) {
         console.error('[WAYLINE] Invalid client JSON:', err.message);
       }
     });
 
     ws.on('close', () => {
+      registeredClients.delete(ws);
       clientSockets.delete(ws);
-      console.log('[WAYLINE] Browser UI disconnected');
+      console.log(`[WAYLINE] Browser UI disconnected: ${clientInfo.nodeName}`);
+      broadcastPeersToClients();
     });
 
   } else {
@@ -273,14 +290,28 @@ function handleClientMessage(msg, clientWs) {
     const packet = msg.packet;
     seenPackets.add(packet.id);
 
-    console.log(`[WAYLINE] Client queued ${packet.type} [${packet.id}] for broadcast`);
+    console.log(`[WAYLINE] Client [${packet.senderName}] queued ${packet.type} [${packet.id}] for broadcast`);
     let sentCount = 0;
 
-    const payload = JSON.stringify(packet);
+    // 1. Deliver to all OTHER connected browser clients
+    const clientPayload = JSON.stringify({ type: 'PACKET_RECEIVED', packet });
+    for (const [otherWs, otherClient] of registeredClients.entries()) {
+      if (otherWs !== clientWs && otherWs.readyState === WebSocket.OPEN) {
+        if (packet.recipientId === '*' || packet.recipientId === otherClient.nodeId) {
+          otherWs.send(clientPayload);
+          sentCount++;
+        }
+      }
+    }
+
+    // 2. Deliver to all peer daemon sockets (mesh)
+    const peerPayload = JSON.stringify(packet);
     for (const [peerId, ws] of peerSockets.entries()) {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-        sentCount++;
+        if (packet.recipientId === '*' || packet.recipientId === peerId) {
+          ws.send(peerPayload);
+          sentCount++;
+        }
       }
     }
 
@@ -292,23 +323,38 @@ function handleClientMessage(msg, clientWs) {
     }));
   } else if (msg.type === 'REFRESH_DISCOVERY') {
     broadcastUdpBeacon();
+    broadcastPeersToClients();
   }
 }
 
 function broadcastPeersToClients() {
-  const peersList = Array.from(discoveredPeers.values()).map(p => ({
+  const daemonPeers = Array.from(discoveredPeers.values()).map(p => ({
     id: p.id,
     name: p.name,
     address: `${p.ip}:${p.port}`,
     status: peerSockets.has(p.id) ? 'CONNECTED' : 'DISCOVERED',
     lastSeen: p.lastSeen,
+    transport: 'UDP_LAN',
     isRelay: true
   }));
 
-  const payload = JSON.stringify({ type: 'PEERS_UPDATED', peers: peersList });
-  for (const client of clientSockets) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(payload);
+  for (const [ws, info] of registeredClients.entries()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      // All other connected browser clients on this LAN
+      const otherClients = Array.from(registeredClients.entries())
+        .filter(([cWs]) => cWs !== ws)
+        .map(([_, c]) => ({
+          id: c.nodeId,
+          name: c.nodeName,
+          address: c.ip,
+          status: 'CONNECTED',
+          transport: 'WEBSOCKET',
+          lastSeen: c.lastSeen,
+          isRelay: true
+        }));
+
+      const combinedPeers = [...otherClients, ...daemonPeers];
+      ws.send(JSON.stringify({ type: 'PEERS_UPDATED', peers: combinedPeers }));
     }
   }
 }

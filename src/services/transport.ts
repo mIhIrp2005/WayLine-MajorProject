@@ -52,7 +52,9 @@ class WaylineTransportService {
     const host = window.location.hostname || 'localhost';
     // Use the port the page was loaded from, or default to 8765
     const port = window.location.port && window.location.port !== '5173' ? window.location.port : '8765';
-    const wsUrl = `ws://${host}:${port}/client?type=client`;
+    const nodeId = this.identity?.nodeId || '';
+    const nodeName = this.identity?.nodeName || '';
+    const wsUrl = `ws://${host}:${port}/client?type=client&nodeId=${encodeURIComponent(nodeId)}&nodeName=${encodeURIComponent(nodeName)}`;
 
     try {
       this.socket = new WebSocket(wsUrl);
@@ -63,6 +65,14 @@ class WaylineTransportService {
         this.state.isScanning = true;
         this.state.lastError = null;
         console.log('[Transport] Connected to WAYLINE local companion');
+        
+        if (this.identity) {
+          this.socket?.send(JSON.stringify({
+            type: 'CLIENT_REGISTER',
+            nodeId: this.identity.nodeId,
+            nodeName: this.identity.nodeName
+          }));
+        }
         this.notify();
       };
 
@@ -196,14 +206,14 @@ class WaylineTransportService {
   public async sendPacket(packet: WaylinePacket): Promise<void> {
     this.state.packetsSent++;
 
-    if (this.socket && this.socket.readyState === WebSocket.OPEN && this.state.peerCount > 0) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({
         type: 'SEND_PACKET',
         packet
       }));
     } else {
-      // No peers or companion offline - message remains stored locally
-      console.log(`[Transport] No active peers connected. Packet [${packet.id}] preserved locally.`);
+      // Companion offline - message remains stored locally
+      console.log(`[Transport] Companion offline. Packet [${packet.id}] preserved locally.`);
       await storage.updateMessageStatus(packet.id, 'SAVED_LOCALLY');
       this.notify();
     }
