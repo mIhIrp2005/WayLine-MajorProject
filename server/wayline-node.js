@@ -23,20 +23,60 @@ const peerSockets = new Map();     // id -> ws
 const clientSockets = new Set();   // Set of browser UI clients
 const seenPackets = new Set();
 
-// Find primary non-internal IPv4 address
-function getLocalIp() {
+// Calculate subnet broadcast address from IP and netmask
+function getBroadcastAddress(ip, netmask) {
+  try {
+    const ipParts = ip.split('.').map(Number);
+    const maskParts = (netmask || '255.255.255.0').split('.').map(Number);
+    const broadcastParts = ipParts.map((part, i) => (part | (~maskParts[i] & 255)));
+    return broadcastParts.join('.');
+  } catch {
+    return '255.255.255.255';
+  }
+}
+
+// Discover and rank network interfaces (prioritizing physical Ethernet and Wi-Fi over virtual adapters)
+function getNetworkInterfaces() {
   const interfaces = os.networkInterfaces();
+  const candidates = [];
+
   for (const name of Object.keys(interfaces)) {
+    const isVirtual = /virtual|vbox|vmware|wsl|pseudo|loopback/i.test(name);
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+        const isVboxSubnet = iface.address.startsWith('192.168.56.') || iface.address.startsWith('169.254.');
+        const isEthernetOrWifi = /ethernet|wi-fi|wlan|lan|en|eth/i.test(name);
+
+        let priority = 10;
+        // High priority for physical Ethernet & Wi-Fi with valid DHCP/LAN IP
+        if (isEthernetOrWifi && !isVirtual && !isVboxSubnet) priority = 100;
+        else if (!isVirtual && !isVboxSubnet) priority = 50;
+        else if (isVboxSubnet || isVirtual) priority = 1;
+
+        const broadcast = getBroadcastAddress(iface.address, iface.netmask);
+        candidates.push({
+          name,
+          address: iface.address,
+          netmask: iface.netmask,
+          broadcast,
+          priority
+        });
       }
     }
   }
-  return '127.0.0.1';
+
+  candidates.sort((a, b) => b.priority - a.priority);
+  return candidates;
 }
 
-const LOCAL_IP = getLocalIp();
+const activeInterfaces = getNetworkInterfaces();
+const primaryIface = activeInterfaces[0] || { name: 'Loopback', address: '127.0.0.1', broadcast: '255.255.255.255' };
+const LOCAL_IP = primaryIface.address;
+
+console.log(`[WAYLINE] Primary Interface: ${primaryIface.name} (${LOCAL_IP})`);
+if (activeInterfaces.length > 1) {
+  console.log(`[WAYLINE] Detected other adapters: ${activeInterfaces.slice(1).map(i => `${i.name}: ${i.address}`).join(', ')}`);
+}
 console.log(`[WAYLINE] Starting node ${NODE_ID} (${NODE_NAME}) on ${LOCAL_IP}:${HTTP_PORT}`);
 
 // --- 1. HTTP Server for Static PWA & API ---
@@ -326,12 +366,15 @@ function broadcastUdpBeacon() {
     timestamp: Date.now()
   }));
 
-  // Send to 255.255.255.255 broadcast address
-  udpSocket.send(beacon, 0, beacon.length, UDP_PORT, '255.255.255.255', (err) => {
-    if (err) {
-      // Some networks block 255.255.255.255, try local subnet broadcast
+  // Send to 255.255.255.255 global broadcast address
+  udpSocket.send(beacon, 0, beacon.length, UDP_PORT, '255.255.255.255', () => {});
+
+  // Also send directly to each physical subnet broadcast address (e.g. Ethernet 192.168.0.255)
+  for (const iface of activeInterfaces) {
+    if (iface.broadcast && iface.broadcast !== '255.255.255.255') {
+      udpSocket.send(beacon, 0, beacon.length, UDP_PORT, iface.broadcast, () => {});
     }
-  });
+  }
 
   // Prune dead peers (not seen for > 15 seconds)
   const now = Date.now();
@@ -361,7 +404,22 @@ udpSocket.bind(UDP_PORT, () => {
   broadcastUdpBeacon();
 });
 
+// Handle server errors (such as EADDRINUSE)
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[WAYLINE ERROR] Port ${HTTP_PORT} is already in use by another process.`);
+    console.error(`- Kill the existing process, or start on another port:`);
+    console.error(`  WAYLINE_PORT=${HTTP_PORT + 1} npm start\n`);
+    process.exit(1);
+  } else {
+    console.error('[WAYLINE ERROR]', err);
+    process.exit(1);
+  }
+});
+
 // Start HTTP & WebSocket server
 server.listen(HTTP_PORT, '0.0.0.0', () => {
   console.log(`[WAYLINE] Emergency node active on http://0.0.0.0:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Accessible on this PC at:       http://localhost:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Accessible on local LAN/Phone at: http://${LOCAL_IP}:${HTTP_PORT}\n`);
 });

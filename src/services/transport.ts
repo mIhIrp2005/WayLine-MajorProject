@@ -50,8 +50,8 @@ class WaylineTransportService {
     }
 
     const host = window.location.hostname || 'localhost';
-    // Use default port 8765 for the local node
-    const port = '8765';
+    // Use the port the page was loaded from, or default to 8765
+    const port = window.location.port && window.location.port !== '5173' ? window.location.port : '8765';
     const wsUrl = `ws://${host}:${port}/client?type=client`;
 
     try {
