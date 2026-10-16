@@ -126,6 +126,28 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 ? `Zero-config discovery broadcasting on UDP port ${transportState.listeningAddress}. Devices on the same Wi-Fi / hotspot link automatically without internet.`
                 : 'Local daemon not detected. All messages, incident notes, and SOS beacons are securely stored in device IndexedDB.'}
             </p>
+
+            {transportState.isCompanionConnected && (
+              <div style={{ 
+                marginTop: 10, 
+                padding: '8px 12px', 
+                background: '#FFFFFF', 
+                border: '1.5px solid var(--color-ink)', 
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8
+              }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                  Easy Link for Nearby Phones: <code style={{ color: '#EA644B', fontWeight: 900 }}>http://wayline.local:{window.location.port || '8765'}</code>
+                </span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
+                  (Fallback: http://{window.location.hostname}:{window.location.port || '8765'})
+                </span>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>

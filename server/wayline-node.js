@@ -463,9 +463,41 @@ server.on('error', (err) => {
   }
 });
 
+// --- 4. mDNS Responder for wayline.local (Port 5353) ---
+const mdnsSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+mdnsSocket.on('error', () => {}); // Silently ignore if port 5353 is used by OS service
+
+mdnsSocket.on('message', (msg, rinfo) => {
+  try {
+    const str = msg.toString('binary');
+    if (str.includes('\x07wayline\x05local')) {
+      const ipParts = LOCAL_IP.split('.').map(Number);
+      if (ipParts.length !== 4) return;
+
+      const response = Buffer.from([
+        0x00, 0x00, 0x84, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x07, 0x77, 0x61, 0x79, 0x6c, 0x69, 0x6e, 0x65, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x00,
+        0x00, 0x01, 0x80, 0x01, 0x00, 0x00, 0x00, 0x78, 0x00, 0x04,
+        ipParts[0], ipParts[1], ipParts[2], ipParts[3]
+      ]);
+
+      mdnsSocket.send(response, 0, response.length, rinfo.port, rinfo.address);
+    }
+  } catch {}
+});
+
+try {
+  mdnsSocket.bind(5353, () => {
+    try {
+      mdnsSocket.addMembership('224.0.0.251');
+    } catch {}
+  });
+} catch {}
+
 // Start HTTP & WebSocket server
 server.listen(HTTP_PORT, '0.0.0.0', () => {
   console.log(`[WAYLINE] Emergency node active on http://0.0.0.0:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Accessible on this PC at:       http://localhost:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Accessible on local LAN/Phone at: http://${LOCAL_IP}:${HTTP_PORT}\n`);
+  console.log(`[WAYLINE] Simple Link (Zero-Config):    http://wayline.local:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Hostname Link:                http://${HOSTNAME}.local:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Direct IP Fallback:           http://${LOCAL_IP}:${HTTP_PORT}\n`);
 });
