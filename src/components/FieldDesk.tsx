@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Radio, 
   ShieldAlert, 
@@ -9,11 +9,14 @@ import {
   Wifi, 
   WifiOff, 
   CheckCircle2, 
-  ArrowRight,
-  Compass,
-  RefreshCw,
-  Clock
+  ArrowRight, 
+  Compass, 
+  RefreshCw, 
+  Clock, 
+  QrCode, 
+  X 
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { 
   TransportState, 
   DiscoveredPeer, 
@@ -45,9 +48,25 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   onNavigateTab,
   onRefreshDiscovery
 }) => {
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState('');
+
   const activeIncidents = incidents.filter(i => i.status === 'ACTIVE');
   const connectedPeers = peers.filter(p => p.status === 'CONNECTED');
   const recentMessages = messages.slice(-4).reverse();
+
+  // Primary network IP for mobile phones
+  const hostIp = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? (transportState.listeningAddress.split(':')[0] || '192.168.0.115')
+    : window.location.hostname;
+  const port = window.location.port || '8765';
+  const directPhoneUrl = `http://${hostIp}:${port}`;
+
+  useEffect(() => {
+    QRCode.toDataURL(directPhoneUrl, { width: 220, margin: 1, color: { dark: '#292D29', light: '#F7F3E8' } })
+      .then(url => setQrDataUrl(url))
+      .catch(err => console.error(err));
+  }, [directPhoneUrl]);
 
   return (
     <div>
@@ -130,22 +149,35 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
             {transportState.isCompanionConnected && (
               <div style={{ 
                 marginTop: 10, 
-                padding: '8px 12px', 
+                padding: '10px 14px', 
                 background: '#FFFFFF', 
-                border: '1.5px solid var(--color-ink)', 
+                border: '2px solid var(--color-ink)', 
                 borderRadius: 'var(--radius-sm)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: 8
+                boxShadow: '1px 1px 0px var(--color-ink)'
               }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>
-                  Easy Link for Nearby Phones: <code style={{ color: '#EA644B', fontWeight: 900 }}>http://wayline.local:{window.location.port || '8765'}</code>
-                </span>
-                <span style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
-                  (Fallback: http://{window.location.hostname}:{window.location.port || '8765'})
-                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
+                      PHONE / CLIENT BROWSER LINK:
+                    </div>
+                    <div style={{ fontSize: '1rem', fontWeight: 900, color: '#EA644B', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      {directPhoneUrl}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', marginTop: 2 }}>
+                      Simple: <code>http://wayline.local:{port}</code> (or scan QR code)
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-tactile btn-sm"
+                    onClick={() => setShowQrModal(true)}
+                    style={{ background: 'var(--color-yellow)' }}
+                  >
+                    <QrCode size={15} />
+                    Scan QR
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -377,6 +409,38 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         </div>
 
       </div>
+
+      {/* QR Code Phone Scanner Modal */}
+      {showQrModal && (
+        <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 360 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan to Join on Phone</h3>
+              <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginBottom: 14 }}>
+              Make sure phone is connected to the same Wi-Fi router or mobile hotspot.
+            </p>
+            {qrDataUrl && (
+              <div style={{ 
+                background: '#F7F3E8', 
+                padding: 12, 
+                borderRadius: 8, 
+                border: '2px solid #292D29', 
+                display: 'inline-block',
+                boxShadow: 'var(--shadow-tactile)'
+              }}>
+                <img src={qrDataUrl} alt="Connect Phone QR Code" style={{ width: 220, height: 220, display: 'block' }} />
+              </div>
+            )}
+            <div style={{ marginTop: 14, fontSize: '0.95rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B' }}>
+              {directPhoneUrl}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
