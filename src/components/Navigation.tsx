@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   Radio, 
   MessageSquare, 
@@ -7,11 +6,12 @@ import {
   Settings, 
   ShieldAlert,
   Wifi,
-  WifiOff
+  WifiOff,
+  Volume2
 } from 'lucide-react';
 import { TransportState } from '../types';
 
-export type ActiveTab = 'field-desk' | 'messages' | 'nearby' | 'incidents' | 'settings';
+export type ActiveTab = 'field-desk' | 'messages' | 'nearby' | 'incidents' | 'settings' | 'acoustic-lab';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -123,6 +123,18 @@ export const Navigation: React.FC<NavigationProps> = ({
             >
               <Settings size={18} />
               Settings
+            </button>
+
+            <button 
+              className={`nav-item ${activeTab === 'acoustic-lab' ? 'active' : ''}`}
+              onClick={() => setActiveTab('acoustic-lab')}
+              style={{ marginTop: 8, borderTop: '1px dashed var(--color-border)', paddingTop: 10 }}
+            >
+              <Volume2 size={18} color="#EA644B" />
+              <span>Acoustic Lab</span>
+              <span className="pill pill-yellow" style={{ marginLeft: 'auto', padding: '1px 5px', fontSize: '0.65rem' }}>
+                EXP
+              </span>
             </button>
           </nav>
         </div>

@@ -15,7 +15,7 @@ class WaylineTransportService {
   public state: TransportState = {
     isCompanionConnected: false,
     activeTransport: 'Initializing...',
-    listeningAddress: 'Checking local interface...',
+    listeningAddress: 'Awaiting local node...',
     peerCount: 0,
     isScanning: false,
     packetsSent: 0,
@@ -88,6 +88,7 @@ class WaylineTransportService {
       this.socket.onclose = () => {
         this.state.isCompanionConnected = false;
         this.state.activeTransport = 'Offline Local Storage Mode';
+        this.state.listeningAddress = 'Local node unreachable';
         this.state.isScanning = false;
         this.state.peerCount = 0;
         this.peers = [];
@@ -101,6 +102,7 @@ class WaylineTransportService {
       this.socket.onerror = () => {
         this.state.isCompanionConnected = false;
         this.state.activeTransport = 'Offline Local Storage Mode';
+        this.state.listeningAddress = 'Local node unreachable';
         this.state.lastError = 'Local node daemon not running on port 8765';
         this.notify();
       };

@@ -42,17 +42,19 @@ function getNetworkInterfaces() {
   const candidates = [];
 
   for (const name of Object.keys(interfaces)) {
-    const isVirtual = /virtual|vbox|vmware|wsl|pseudo|loopback/i.test(name);
+    const isVirtual = /virtual|vbox|vmware|wsl|pseudo|loopback|vethernet|hyper-v|default switch/i.test(name);
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        const isVboxSubnet = iface.address.startsWith('192.168.56.') || iface.address.startsWith('169.254.');
-        const isEthernetOrWifi = /ethernet|wi-fi|wlan|lan|en|eth/i.test(name);
+        const isExcludedSubnet = iface.address.startsWith('192.168.56.') || 
+                                 iface.address.startsWith('169.254.') || 
+                                 iface.address.startsWith('127.');
+        const isEthernetOrWifi = /ethernet|wi-fi|wlan|lan|en|eth|wireless/i.test(name);
 
         let priority = 10;
         // High priority for physical Ethernet & Wi-Fi with valid DHCP/LAN IP
-        if (isEthernetOrWifi && !isVirtual && !isVboxSubnet) priority = 100;
-        else if (!isVirtual && !isVboxSubnet) priority = 50;
-        else if (isVboxSubnet || isVirtual) priority = 1;
+        if (isEthernetOrWifi && !isVirtual && !isExcludedSubnet) priority = 100;
+        else if (!isVirtual && !isExcludedSubnet) priority = 50;
+        else if (isExcludedSubnet || isVirtual) priority = 1;
 
         const broadcast = getBroadcastAddress(iface.address, iface.netmask);
         candidates.push({

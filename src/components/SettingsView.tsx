@@ -8,7 +8,8 @@ import {
   Radio, 
   ShieldCheck, 
   AlertTriangle,
-  Info
+  Info,
+  Volume2
 } from 'lucide-react';
 import { LocalIdentity, TransportState } from '../types';
 import { storage } from '../services/storage';
@@ -19,6 +20,7 @@ interface SettingsViewProps {
   isOfflineReady: boolean;
   onIdentityUpdated: (newIdentity: LocalIdentity) => void;
   onDataCleared: () => void;
+  onOpenAcousticLab?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -26,7 +28,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   transportState,
   isOfflineReady,
   onIdentityUpdated,
-  onDataCleared
+  onDataCleared,
+  onOpenAcousticLab
 }) => {
   const [nodeName, setNodeName] = useState(identity.nodeName);
   const [isSavingName, setIsSavingName] = useState(false);
@@ -142,10 +145,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             border: '1.5px solid var(--color-ink)', 
             borderRadius: 'var(--radius-sm)',
             fontSize: '0.78rem',
-            fontFamily: 'var(--font-mono)'
+            fontFamily: 'var(--font-mono)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4
           }}>
             <div>Status: {isOfflineReady ? '100% Precached & Ready' : 'Service worker registering...'}</div>
-            <div>Storage Engine: HTML5 IndexedDB</div>
+            <div>Canonical PWA URL: <code>{((import.meta as any).env?.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'N/A')}</code></div>
+            <div>Secure Context: {typeof window !== 'undefined' && window.isSecureContext ? '✓ Enabled (HTTPS / localhost)' : '⚠ Insecure origin (Microphone blocked by Chrome)'}</div>
+            <div>Local Node Adapter: {transportState.isCompanionConnected ? transportState.listeningAddress : 'Offline / Standalone'}</div>
+            <div>Storage Engine: HTML5 IndexedDB (wayline_offline_db)</div>
             <div>Cache Name: wayline-cache-v1</div>
           </div>
         </div>
@@ -177,6 +186,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Experimental Acoustic Lab Navigation Card */}
+        {onOpenAcousticLab && (
+          <div className="bento-card col-span-12">
+            <div className="card-header">
+              <span className="card-title">
+                <Volume2 size={16} color="#EA644B" />
+                ACOUSTIC COMMUNICATION TESTING FACILITY
+              </span>
+              <span className="pill pill-yellow">EXPERIMENTAL</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-ink-muted)', maxWidth: 540 }}>
+                Test speaker-to-microphone data transfers, audible 2-FSK modulation, round-trip acoustic ACKs, and discovery beacons across two physical devices without network connectivity.
+              </p>
+              <button
+                className="btn-tactile btn-sm"
+                onClick={onOpenAcousticLab}
+              >
+                <Volume2 size={14} />
+                Open Acoustic Lab
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Danger Zone: Clear Local Data */}
         <div className="bento-card col-span-12" style={{ borderStyle: 'dashed' }}>

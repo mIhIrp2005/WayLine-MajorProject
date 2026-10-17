@@ -6,6 +6,7 @@ import { NearbyView } from './components/NearbyView';
 import { IncidentsView } from './components/IncidentsView';
 import { SettingsView } from './components/SettingsView';
 import { SosModal } from './components/SosModal';
+import { AcousticLabView } from './components/experimental/AcousticLabView';
 import { 
   LocalIdentity, 
   TransportState, 
@@ -157,6 +158,13 @@ export const App: React.FC = () => {
             isOfflineReady={isOfflineReady}
             onIdentityUpdated={(newId) => setIdentity(newId)}
             onDataCleared={loadData}
+            onOpenAcousticLab={() => setActiveTab('acoustic-lab')}
+          />
+        )}
+
+        {activeTab === 'acoustic-lab' && (
+          <AcousticLabView
+            localNodeName={identity.nodeName}
           />
         )}
       </main>
