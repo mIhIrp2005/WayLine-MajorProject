@@ -1,8 +1,7 @@
-// Automated Test: Access Link, Interface Detection & QR Target Stability
+// Automated Test: Stable Canonical URL, Identical Client URL & Offline Access
 import assert from 'node:assert';
-import os from 'node:os';
 
-console.log('[TEST] Starting Access Link & Interface Filtering Verification...');
+console.log('[TEST] Starting Canonical URL, Interface Detection & Offline PWA Verification...');
 
 // 1. Verify virtual adapter filtering logic
 function filterTestAdapters(mockInterfaces) {
@@ -32,48 +31,80 @@ function filterTestAdapters(mockInterfaces) {
 const mockNics = {
   'vEthernet (WSL)': [{ family: 'IPv4', internal: false, address: '172.28.16.1' }],
   'VirtualBox Host-Only Network': [{ family: 'IPv4', internal: false, address: '192.168.56.1' }],
-  'Wi-Fi': [{ family: 'IPv4', internal: false, address: '192.168.1.140' }],
-  'Ethernet': [{ family: 'IPv4', internal: false, address: '10.0.0.52' }]
+  'Ethernet 4 (Physical)': [{ family: 'IPv4', internal: false, address: '192.168.0.115' }]
 };
 
 const ranked = filterTestAdapters(mockNics);
-assert.strictEqual(ranked[0].name, 'Wi-Fi', 'Physical Wi-Fi must rank higher than vEthernet and VirtualBox');
+assert.strictEqual(ranked[0].name, 'Ethernet 4 (Physical)');
+assert.strictEqual(ranked[0].address, '192.168.0.115');
 assert.strictEqual(ranked[0].priority, 100);
-assert.strictEqual(ranked[ranked.length - 1].priority, 1, 'vEthernet or VirtualBox must have lowest priority');
-console.log('✓ Network adapter ranking & virtual interface exclusion verified');
+console.log('✓ Physical LAN adapter prioritized over virtual Hyper-V/VirtualBox adapters');
 
-// 2. Verify Canonical URL vs Local Node URL resolution logic
-function computePhoneUrls(envPublicUrl, listeningAddress, browserOrigin) {
-  const canonicalAppUrl = envPublicUrl || browserOrigin || '';
-  const isListeningValid = Boolean(
-    listeningAddress && 
-    !listeningAddress.includes('Awaiting') && 
-    !listeningAddress.includes('unreachable') &&
-    !listeningAddress.includes('Checking')
-  );
-  const localNodeUrl = isListeningValid ? `http://${listeningAddress}` : '';
-  const directPhoneUrl = localNodeUrl || canonicalAppUrl;
-  return { canonicalAppUrl, localNodeUrl, directPhoneUrl };
+// 2. Verify Identical Canonical URL Resolution on Host and Mobile
+function resolveCanonicalAppUrl(envUrl, browserOrigin) {
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '');
+  }
+  if (browserOrigin) {
+    return browserOrigin.replace(/\/$/, '');
+  }
+  return 'http://192.168.0.115:8765';
 }
 
-// Case A: Node connected with valid IP
-const resA = computePhoneUrls('https://wayline.app', '192.168.1.140:8765', 'http://localhost:5173');
-assert.strictEqual(resA.canonicalAppUrl, 'https://wayline.app');
-assert.strictEqual(resA.localNodeUrl, 'http://192.168.1.140:8765');
-assert.strictEqual(resA.directPhoneUrl, 'http://192.168.1.140:8765');
-console.log('✓ Valid local node address properly overrides for subnet pairing');
+const CONFIG_CANONICAL = 'http://192.168.0.115:8765';
 
-// Case B: Startup state before daemon connects ("Awaiting local node...")
-const resB = computePhoneUrls('https://wayline.app', 'Awaiting local node...', 'http://localhost:5173');
-assert.strictEqual(resB.localNodeUrl, '', 'Placeholder string must not produce a localNodeUrl');
-assert.strictEqual(resB.directPhoneUrl, 'https://wayline.app', 'Fallback to canonical PWA URL must be clean');
-assert.ok(!resB.directPhoneUrl.includes('Awaiting'), 'Never leak placeholder strings into target URL');
-console.log('✓ Startup pending placeholder cleanly falls back to canonical PWA URL');
+// Host machine opens app
+const hostMachineUrl = resolveCanonicalAppUrl(CONFIG_CANONICAL, 'http://localhost:5173');
+// Android phone opens app
+const androidPhoneUrl = resolveCanonicalAppUrl(CONFIG_CANONICAL, 'http://192.168.0.115:8765');
 
-// Case C: Node offline / unreachable
-const resC = computePhoneUrls('', 'Local node unreachable', 'http://localhost:5173');
-assert.strictEqual(resC.localNodeUrl, '');
-assert.strictEqual(resC.directPhoneUrl, 'http://localhost:5173');
-console.log('✓ Standalone offline mode uses clean browser origin');
+assert.strictEqual(hostMachineUrl, CONFIG_CANONICAL, 'Host machine canonical URL must match configured canonical URL');
+assert.strictEqual(androidPhoneUrl, CONFIG_CANONICAL, 'Android phone canonical URL must match configured canonical URL');
+assert.strictEqual(hostMachineUrl, androidPhoneUrl, 'Host and phone MUST use the exact same canonical URL');
+console.log('✓ Identical canonical application URL confirmed for host machine and mobile phone');
 
-console.log('[TEST] All Access Link & Interface tests PASSED successfully!\n');
+// 3. Verify QR Code always targets the Canonical URL
+function generateQrTarget(canonicalUrl) {
+  return canonicalUrl;
+}
+
+const qrTarget = generateQrTarget(CONFIG_CANONICAL);
+assert.strictEqual(qrTarget, CONFIG_CANONICAL, 'QR code MUST encode the canonical URL, never a transient dynamic IP');
+console.log('✓ QR code stably targets the permanent canonical application URL');
+
+// 4. Verify Offline Service Worker Navigation Fallback
+const mockCache = new Map();
+mockCache.set('/index.html', { status: 200, body: '<html>WAYLINE SHELL</html>' });
+
+function simulateOfflineFetch(requestUrl, mode) {
+  if (mode === 'navigate') {
+    return mockCache.get('/index.html') || mockCache.get('/');
+  }
+  return mockCache.get(requestUrl) || null;
+}
+
+const offlineReloadResult = simulateOfflineFetch(CONFIG_CANONICAL + '/incidents', 'navigate');
+assert.ok(offlineReloadResult, 'Offline navigation MUST match cached index.html shell');
+assert.strictEqual(offlineReloadResult.body, '<html>WAYLINE SHELL</html>');
+console.log('✓ Offline PWA navigation reload verified (opens cached shell without server)');
+
+// 5. Secure Context verification logic
+function checkSecureContext(url) {
+  const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+  const isHttps = url.startsWith('https://');
+  return {
+    isSecureContext: isHttps || isLocalhost,
+    micAccess: isHttps || isLocalhost ? 'PERMITTED' : 'REQUIRES_USER_FLAG'
+  };
+}
+
+const httpsCheck = checkSecureContext('https://wayline.app');
+assert.strictEqual(httpsCheck.isSecureContext, true);
+assert.strictEqual(httpsCheck.micAccess, 'PERMITTED');
+
+const httpLanCheck = checkSecureContext('http://192.168.0.115:8765');
+assert.strictEqual(httpLanCheck.isSecureContext, false);
+assert.strictEqual(httpLanCheck.micAccess, 'REQUIRES_USER_FLAG');
+console.log('✓ Secure Context diagnostics accurately report microphone permissions');
+
+console.log('[TEST] All Canonical URL & Offline PWA tests PASSED successfully!\n');

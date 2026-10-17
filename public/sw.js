@@ -62,9 +62,9 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       }).catch(() => {
-        // If navigating and offline, return cached index.html
+        // If navigating and offline, return cached index.html shell
         if (event.request.mode === 'navigate') {
-          return caches.match('/');
+          return caches.match('/index.html').then(r => r || caches.match('/'));
         }
       });
     })

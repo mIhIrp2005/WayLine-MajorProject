@@ -8,6 +8,23 @@ import path from 'node:path';
 import os from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 
+// Native .env file loader
+try {
+  const envPath = path.resolve('.env');
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [k, ...v] = trimmed.split('=');
+        const key = k.trim();
+        const val = v.join('=').trim().replace(/^["']|["']$/g, '');
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+  }
+} catch {}
+
 const HTTP_PORT = parseInt(process.env.WAYLINE_PORT || '8765', 10);
 const UDP_PORT = parseInt(process.env.WAYLINE_UDP_PORT || '8766', 10);
 const BROADCAST_INTERVAL_MS = 3000;
@@ -498,8 +515,12 @@ try {
 
 // Start HTTP & WebSocket server
 server.listen(HTTP_PORT, '0.0.0.0', () => {
-  console.log(`[WAYLINE] Emergency node active on http://0.0.0.0:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Simple Link (Zero-Config):    http://wayline.local:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Hostname Link:                http://${HOSTNAME}.local:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Direct IP Fallback:           http://${LOCAL_IP}:${HTTP_PORT}\n`);
+  const canonicalUrl = process.env.VITE_PUBLIC_APP_URL || `http://${LOCAL_IP}:${HTTP_PORT}`;
+  console.log(`\n======================================================`);
+  console.log(`[WAYLINE] CANONICAL APPLICATION URL: ${canonicalUrl}`);
+  console.log(`[WAYLINE] (Open this exact URL on PC and phones to cache PWA)`);
+  console.log(`======================================================`);
+  console.log(`[WAYLINE] Local Node Server:         http://0.0.0.0:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Local Subnet IP:           http://${LOCAL_IP}:${HTTP_PORT}`);
+  console.log(`[WAYLINE] Zero-Config mDNS:          http://wayline.local:${HTTP_PORT}\n`);
 });

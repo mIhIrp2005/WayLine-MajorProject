@@ -3,6 +3,7 @@
   "short_name": "WAYLINE",
   "description": "Offline-first emergency communication and nearby peer discovery network",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#F7F3E8",
   "theme_color": "#292D29",

@@ -24,6 +24,7 @@ import {
   StoredMessage, 
   LocalIdentity 
 } from '../types';
+import { getCanonicalAppUrl } from '../services/config';
 
 interface FieldDeskProps {
   identity: LocalIdentity;
@@ -55,10 +56,10 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   const connectedPeers = peers.filter(p => p.status === 'CONNECTED');
   const recentMessages = messages.slice(-4).reverse();
 
-  // 1. Canonical application URL for precaching & bookmarking (configured via VITE_PUBLIC_APP_URL or current browser origin)
-  const canonicalAppUrl = ((import.meta as any).env?.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : '');
+  // 1. Permanent canonical application URL (identical on PC and Android)
+  const canonicalAppUrl = getCanonicalAppUrl();
 
-  // 2. Dynamic local node IP for subnet device pairing
+  // 2. Dynamic local node IP for subnet device pairing (diagnostic only)
   const isListeningValid = Boolean(
     transportState.listeningAddress && 
     !transportState.listeningAddress.includes('Awaiting') && 
@@ -66,20 +67,13 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
     !transportState.listeningAddress.includes('Checking')
   );
 
-  const localNodeUrl = isListeningValid
-    ? `http://${transportState.listeningAddress}`
-    : (window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-        ? `${window.location.protocol}//${window.location.hostname}:${window.location.port || '8765'}`
-        : '');
-
-  const directPhoneUrl = localNodeUrl || canonicalAppUrl;
+  const localNodeUrl = isListeningValid ? `http://${transportState.listeningAddress}` : '';
 
   useEffect(() => {
-    if (!directPhoneUrl) return;
-    QRCode.toDataURL(directPhoneUrl, { width: 220, margin: 1, color: { dark: '#292D29', light: '#F7F3E8' } })
+    QRCode.toDataURL(canonicalAppUrl, { width: 220, margin: 1, color: { dark: '#292D29', light: '#F7F3E8' } })
       .then(url => setQrDataUrl(url))
       .catch(err => console.error(err));
-  }, [directPhoneUrl]);
+  }, [canonicalAppUrl]);
 
   return (
     <div>
@@ -171,13 +165,13 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {localNodeUrl ? 'LOCAL SUBNET NODE LINK:' : 'CANONICAL PWA LINK:'}
+                      CANONICAL APPLICATION URL:
                     </div>
                     <div style={{ fontSize: '1rem', fontWeight: 900, color: '#EA644B', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      {directPhoneUrl}
+                      {canonicalAppUrl}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', marginTop: 2 }}>
-                      {localNodeUrl ? 'Direct IP or mDNS: http://wayline.local:8765' : 'Bookmark & visit to precache PWA offline'}
+                      Identical link for PC and phone • Precache once for permanent offline use
                     </div>
                   </div>
 
@@ -428,15 +422,13 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 360 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan to Join on Phone</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan Canonical Application URL</h3>
               <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginBottom: 14 }}>
-              {localNodeUrl
-                ? 'Make sure phone is connected to the same Wi-Fi router or mobile hotspot to link with this local node.'
-                : 'Open this canonical link in Android Chrome to precache WAYLINE for offline use.'}
+              Open this identical URL on your Android phone to cache WAYLINE for offline use.
             </p>
             {qrDataUrl && (
               <div style={{ 
@@ -447,12 +439,17 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 display: 'inline-block',
                 boxShadow: 'var(--shadow-tactile)'
               }}>
-                <img src={qrDataUrl} alt="Connect Phone QR Code" style={{ width: 220, height: 220, display: 'block' }} />
+                <img src={qrDataUrl} alt="Canonical Application QR Code" style={{ width: 220, height: 220, display: 'block' }} />
               </div>
             )}
             <div style={{ marginTop: 14, fontSize: '0.95rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B' }}>
-              {directPhoneUrl}
+              {canonicalAppUrl}
             </div>
+            {localNodeUrl && (
+              <div style={{ marginTop: 8, fontSize: '0.72rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
+                Companion Node: {localNodeUrl} (auto-pairs on local Wi-Fi)
+              </div>
+            )}
           </div>
         </div>
       )}

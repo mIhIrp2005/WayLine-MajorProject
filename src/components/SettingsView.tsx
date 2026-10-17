@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { LocalIdentity, TransportState } from '../types';
 import { storage } from '../services/storage';
+import { getCanonicalAppUrl } from '../services/config';
 
 interface SettingsViewProps {
   identity: LocalIdentity;
@@ -151,7 +152,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             gap: 4
           }}>
             <div>Status: {isOfflineReady ? '100% Precached & Ready' : 'Service worker registering...'}</div>
-            <div>Canonical PWA URL: <code>{((import.meta as any).env?.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'N/A')}</code></div>
+            <div>Canonical PWA URL: <code>{getCanonicalAppUrl()}</code></div>
             <div>Secure Context: {typeof window !== 'undefined' && window.isSecureContext ? '✓ Enabled (HTTPS / localhost)' : '⚠ Insecure origin (Microphone blocked by Chrome)'}</div>
             <div>Local Node Adapter: {transportState.isCompanionConnected ? transportState.listeningAddress : 'Offline / Standalone'}</div>
             <div>Storage Engine: HTML5 IndexedDB (wayline_offline_db)</div>
