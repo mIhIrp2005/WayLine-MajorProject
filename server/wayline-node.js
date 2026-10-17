@@ -112,6 +112,14 @@ const mimeTypes = {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   
+  // Captive Portal Probe Redirects (Android, iOS, Windows)
+  if (/generate_204|gen_204|hotspot-detect\.html|connecttest\.txt|ncsi\.txt/i.test(url.pathname)) {
+    const target = `http://${LOCAL_IP}:${HTTP_PORT}/`;
+    res.writeHead(302, { 'Location': target, 'Content-Type': 'text/html' });
+    res.end(`<a href="${target}">Connect to WAYLINE</a>`);
+    return;
+  }
+
   // Basic health/diagnostic endpoint
   if (url.pathname === '/api/status') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -510,6 +518,75 @@ try {
     try {
       mdnsSocket.addMembership('224.0.0.251');
     } catch {}
+  });
+} catch {}
+
+// --- 5. Captive Portal Port 80 Redirect Service ---
+// Automatically triggers "Sign in to network" popup on Android & iOS when connected to hotspot
+try {
+  const captiveHttp = http.createServer((req, res) => {
+    const targetUrl = `http://${LOCAL_IP}:${HTTP_PORT}/`;
+    res.writeHead(302, {
+      'Location': targetUrl,
+      'Content-Type': 'text/html'
+    });
+    res.end(`<html><head><meta http-equiv="refresh" content="0;url=${targetUrl}"></head><body><a href="${targetUrl}">Open WAYLINE Emergency Network</a></body></html>`);
+  });
+
+  captiveHttp.on('error', () => {
+    // Port 80 may be restricted on some non-admin environments - non-fatal
+  });
+
+  captiveHttp.listen(80, '0.0.0.0', () => {
+    console.log(`[WAYLINE] Captive Portal Redirect:   http://0.0.0.0:80 (Auto-popup on Wi-Fi connection)`);
+  });
+} catch {}
+
+// --- 6. Captive DNS Responder (UDP 53) ---
+// Resolves connectivity check domains to LOCAL_IP so phones trigger captive portal immediately
+try {
+  const dnsSocket = dgram.createSocket('udp4');
+  dnsSocket.on('error', () => {}); // Non-fatal if port 53 is restricted
+
+  dnsSocket.on('message', (query, rinfo) => {
+    try {
+      if (query.length < 12) return;
+      const ipParts = LOCAL_IP.split('.').map(Number);
+      if (ipParts.length !== 4) return;
+
+      let qEnd = 12;
+      while (qEnd < query.length && query[qEnd] !== 0) qEnd++;
+      qEnd += 5;
+      if (qEnd > query.length) return;
+
+      const question = query.slice(12, qEnd);
+      const id = query.slice(0, 2);
+
+      const header = Buffer.from([
+        id[0], id[1],
+        0x81, 0x80, // Response, Authoritative
+        0x00, 0x01, // 1 question
+        0x00, 0x01, // 1 answer
+        0x00, 0x00,
+        0x00, 0x00
+      ]);
+
+      const answer = Buffer.from([
+        0xc0, 0x0c, // Pointer to domain in question
+        0x00, 0x01, // Type A
+        0x00, 0x01, // Class IN
+        0x00, 0x00, 0x00, 0x3c, // TTL 60 seconds
+        0x00, 0x04, // Length 4
+        ipParts[0], ipParts[1], ipParts[2], ipParts[3]
+      ]);
+
+      const response = Buffer.concat([header, question, answer]);
+      dnsSocket.send(response, 0, response.length, rinfo.port, rinfo.address);
+    } catch {}
+  });
+
+  dnsSocket.bind(53, '0.0.0.0', () => {
+    console.log(`[WAYLINE] Captive DNS Server:        UDP:53 (Instant Hotspot Domain Resolution)`);
   });
 } catch {}
 
