@@ -201,7 +201,15 @@ export const Navigation: React.FC<NavigationProps> = ({
           onClick={() => setActiveTab('incidents')}
         >
           <AlertTriangle size={18} />
-          <span>Incidents</span>
+          <span>Alerts</span>
+        </button>
+
+        <button 
+          className={`mobile-nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+          onClick={() => setActiveTab('settings')}
+        >
+          <Settings size={18} />
+          <span>Settings</span>
         </button>
       </nav>
     </>

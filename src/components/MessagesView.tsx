@@ -14,23 +14,32 @@ import { StoredMessage, DiscoveredPeer, LocalIdentity, DeliveryStatus } from '..
 import { protocol } from '../services/protocol';
 import { storage } from '../services/storage';
 import { transport } from '../services/transport';
+import { encryptAes, decryptAes } from '../services/crypto';
+import { Lock, Unlock, Key } from 'lucide-react';
 
 interface MessagesViewProps {
   identity: LocalIdentity;
   messages: StoredMessage[];
   peers: DiscoveredPeer[];
   onMessageSent: () => void;
+  onTriggerSos?: () => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
   identity,
   messages,
   peers,
-  onMessageSent
+  onMessageSent,
+  onTriggerSos
 }) => {
   const [inputText, setInputText] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState<string>('*');
   const [sending, setSending] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [encryptionKey, setEncryptionKey] = useState<string>('');
+  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
+  const [decryptedTexts, setDecryptedTexts] = useState<Record<string, string>>({});
+  const lastSendTimesRef = useRef<number[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const connectedPeers = peers.filter(p => p.status === 'CONNECTED');
@@ -43,17 +52,61 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     scrollToBottom();
   }, [messages]);
 
+  // Decrypt encrypted messages dynamically when encryption key changes or messages update
+  useEffect(() => {
+    let isCancelled = false;
+    const decryptAll = async () => {
+      const results: Record<string, string> = {};
+      for (const m of messages) {
+        if (m.content && m.content.startsWith('aes:')) {
+          results[m.id] = await decryptAes(m.content, encryptionKey);
+        }
+      }
+      if (!isCancelled) {
+        setDecryptedTexts(results);
+      }
+    };
+    decryptAll();
+    return () => { isCancelled = true; };
+  }, [messages, encryptionKey]);
+
+  // Anti-spam cooldown timer countdown
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
-    if (!text || sending) return;
+    if (!text || sending || cooldown > 0) return;
+
+    // Spam check: check rapid sends within the last 5 seconds
+    const now = Date.now();
+    const recentSends = lastSendTimesRef.current.filter(t => now - t < 5000);
+
+    // If 4 rapid messages were already sent in 5s, block and auto-trigger SOS
+    if (recentSends.length >= 4) {
+      setCooldown(10); // 10-second penalty cooldown
+      lastSendTimesRef.current = [];
+      if (onTriggerSos) onTriggerSos();
+      return;
+    }
 
     setSending(true);
     try {
+      // Encrypt message content with AES-GCM 256-bit if key is provided
+      const outboundContent = encryptionKey.trim() 
+        ? await encryptAes(text, encryptionKey.trim()) 
+        : text;
+
       // 1. Create packet and stored representation
       const { packet, storedMessage } = protocol.createChatPacket(
         identity,
-        text,
+        outboundContent,
         selectedRecipient
       );
 
@@ -63,6 +116,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       // 3. Dispatch over real transport
       await transport.sendPacket(packet);
 
+      lastSendTimesRef.current = [...recentSends, now];
       setInputText('');
       onMessageSent();
     } catch (err) {
@@ -156,6 +210,42 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             Direct addressed node transmission
           </span>
         )}
+
+        {/* AES Encryption Toggle & Key Input */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="btn-tactile btn-sm"
+            onClick={() => setShowKeyInput(!showKeyInput)}
+            style={{
+              padding: '4px 8px',
+              fontSize: '0.74rem',
+              background: encryptionKey ? '#73966A' : 'var(--color-paper)',
+              color: encryptionKey ? '#FFFFFF' : 'var(--color-ink)'
+            }}
+            title="Toggle AES-256 GCM encryption"
+          >
+            {encryptionKey ? <Lock size={13} /> : <Unlock size={13} />}
+            <span>{encryptionKey ? 'AES Locked' : 'Plaintext'}</span>
+          </button>
+
+          {showKeyInput && (
+            <input
+              type="password"
+              placeholder="Shared key..."
+              value={encryptionKey}
+              onChange={(e) => setEncryptionKey(e.target.value)}
+              style={{
+                width: 130,
+                padding: '4px 8px',
+                fontSize: '0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1.5px solid var(--color-ink)',
+                background: 'var(--color-paper)'
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {/* Message List */}
@@ -202,7 +292,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 </div>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.4, wordBreak: 'break-word' }}>
-                  {m.content}
+                  {m.content && m.content.startsWith('aes:') && (
+                    <Lock size={12} style={{ display: 'inline', marginRight: 5, verticalAlign: '-1px', color: '#73966A' }} />
+                  )}
+                  {m.content && m.content.startsWith('aes:') ? (decryptedTexts[m.id] || '🔒 Encrypted message (key required)') : m.content}
                 </div>
 
                 <div style={{ 
@@ -246,11 +339,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         <button
           type="submit"
           className="btn-tactile btn-coral"
-          disabled={!inputText.trim() || sending}
+          disabled={!inputText.trim() || sending || cooldown > 0}
           style={{ minWidth: 100 }}
         >
           <Send size={16} />
-          {sending ? 'Sending...' : 'Send'}
+          {sending ? 'Sending...' : cooldown > 0 ? `Wait ${cooldown}s` : 'Send'}
         </button>
       </form>
     </div>

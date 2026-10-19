@@ -1,29 +1,61 @@
-// WAYLINE Message Protocol & Packet Handler
-// Inspired by Bitchat wireless packet format: version, id, type, sender, recipient, TTL, hopCount, payload, signature
 import { WaylinePacket, MessageType, StoredMessage, EmergencyIncident, LocalIdentity } from '../types';
+import { storage } from './storage';
 
 const PROTOCOL_VERSION = 1;
 const DEFAULT_TTL = 3;
-const MAX_SEEN_PACKETS = 1000;
+const MAX_SEEN_PACKETS = 2000;
+
+// Standard CRC-16-CCITT implementation for packet & frame integrity
+export function crc16Ccitt(data: string | Uint8Array): number {
+  let crc = 0xFFFF;
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= (bytes[i] << 8);
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+      } else {
+        crc = (crc << 1) & 0xFFFF;
+      }
+    }
+  }
+  return crc;
+}
 
 class WaylineProtocol {
   private seenPacketIds: Set<string> = new Set();
   private seenPacketOrder: string[] = [];
+  private isHydrated = false;
+
+  constructor() {
+    this.hydrateFromStorage();
+  }
+
+  // Hydrate seen packet IDs from persistent IndexedDB store
+  public async hydrateFromStorage(): Promise<void> {
+    if (this.isHydrated) return;
+    try {
+      const persistedIds = await storage.getRecentSeenPackets(MAX_SEEN_PACKETS);
+      for (const id of persistedIds) {
+        this.seenPacketIds.add(id);
+        this.seenPacketOrder.push(id);
+      }
+      this.isHydrated = true;
+    } catch {
+      // Memory fallback if storage not yet ready
+    }
+  }
 
   // Generate a random unique ID
   generateId(prefix: string = 'msg'): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
-  // Calculate simple string hash for packet integrity check
+  // Calculate CRC-16 checksum for packet payload & metadata integrity
   calculateChecksum(packet: Partial<WaylinePacket>): string {
     const raw = `${packet.version}:${packet.id}:${packet.senderId}:${packet.type}:${packet.timestamp}`;
-    let hash = 0;
-    for (let i = 0; i < raw.length; i++) {
-      hash = (hash << 5) - hash + raw.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16);
+    const crc = crc16Ccitt(raw);
+    return crc.toString(16).padStart(4, '0');
   }
 
   // Create a chat packet
@@ -177,6 +209,9 @@ class WaylineProtocol {
     if (this.seenPacketIds.has(packetId)) return;
     this.seenPacketIds.add(packetId);
     this.seenPacketOrder.push(packetId);
+
+    // Persist to durable storage
+    storage.saveSeenPacket(packetId).catch(() => {});
 
     if (this.seenPacketOrder.length > MAX_SEEN_PACKETS) {
       const oldest = this.seenPacketOrder.shift();

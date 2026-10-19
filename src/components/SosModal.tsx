@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShieldAlert, 
   X, 
@@ -9,7 +9,9 @@ import {
   AlertOctagon,
   Flame,
   CheckCircle2,
-  Info
+  Info,
+  Clock,
+  XCircle
 } from 'lucide-react';
 import { EmergencyCategory, GeoLocationData, LocalIdentity } from '../types';
 import { protocol } from '../services/protocol';
@@ -31,14 +33,62 @@ export const SosModal: React.FC<SosModalProps> = ({
 }) => {
   const [category, setCategory] = useState<EmergencyCategory>('MEDICAL');
   const [description, setDescription] = useState('');
+  const [manualLocation, setManualLocation] = useState('');
   const [includeLocation, setIncludeLocation] = useState(true);
   const [location, setLocation] = useState<GeoLocationData | undefined>();
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmed, setConfirmed] = useState(true); // default true for emergency auto-submit
   const [submitting, setSubmitting] = useState(false);
 
+  // 10-second emergency auto-submit countdown
+  const [countdown, setCountdown] = useState<number>(10);
+  const [autoSubmitActive, setAutoSubmitActive] = useState<boolean>(true);
+  const autoSubmitTimerRef = useRef<any>(null);
+
+  // Reset or run countdown on modal open
+  useEffect(() => {
+    if (!isOpen) {
+      if (autoSubmitTimerRef.current) clearInterval(autoSubmitTimerRef.current);
+      setCountdown(10);
+      setAutoSubmitActive(true);
+      return;
+    }
+
+    // Auto-fetch location immediately when modal opens
+    handleFetchLocation();
+
+    setCountdown(10);
+    setAutoSubmitActive(true);
+
+    autoSubmitTimerRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(autoSubmitTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (autoSubmitTimerRef.current) clearInterval(autoSubmitTimerRef.current);
+    };
+  }, [isOpen]);
+
+  // When countdown reaches 0 and auto-submit is still active, trigger SOS dispatch
+  useEffect(() => {
+    if (isOpen && autoSubmitActive && countdown === 0 && !submitting) {
+      triggerSosDispatch();
+    }
+  }, [countdown, autoSubmitActive, isOpen]);
+
   if (!isOpen) return null;
+
+  const cancelAutoSubmit = () => {
+    if (autoSubmitTimerRef.current) clearInterval(autoSubmitTimerRef.current);
+    setAutoSubmitActive(false);
+  };
 
   const categories: { key: EmergencyCategory; label: string; icon: React.ReactNode; color: string }[] = [
     { key: 'MEDICAL', label: 'Medical Assistance', icon: <HeartPulse size={18} />, color: '#EA644B' },
@@ -49,40 +99,67 @@ export const SosModal: React.FC<SosModalProps> = ({
   ];
 
   const handleFetchLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation not supported by this browser');
+    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      setLocationLoading(false);
+      setLocationError('Mobile browsers block hardware GPS over plain LAN HTTP. Type your location/landmark below, or enable chrome://flags/#unsafely-treat-insecure-origin-as-secure.');
       return;
     }
+
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser.');
+      return;
+    }
+
     setLocationLoading(true);
     setLocationError(null);
 
+    // Fast-fallback geolocation:
+    // Attempt high accuracy first (quick 4s timeout). If mobile GPS times out or throws,
+    // fallback immediately to standard cell/Wi-Fi/cached location (10s timeout).
+    const onLocationSuccess = (pos: GeolocationPosition) => {
+      setLocation({
+        latitude: Number(pos.coords.latitude.toFixed(6)),
+        longitude: Number(pos.coords.longitude.toFixed(6)),
+        accuracy: Math.round(pos.coords.accuracy),
+        timestamp: pos.timestamp
+      });
+      setLocationLoading(false);
+      setLocationError(null);
+    };
+
+    const tryLowAccuracyFallback = () => {
+      navigator.geolocation.getCurrentPosition(
+        onLocationSuccess,
+        (fallbackErr) => {
+          setLocationError(`GPS unavailable (${fallbackErr.message}). Enter your location or landmark below.`);
+          setLocationLoading(false);
+        },
+        { timeout: 10000, enableHighAccuracy: false, maximumAge: 120000 }
+      );
+    };
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({
-          latitude: Number(pos.coords.latitude.toFixed(6)),
-          longitude: Number(pos.coords.longitude.toFixed(6)),
-          accuracy: Math.round(pos.coords.accuracy),
-          timestamp: pos.timestamp
-        });
-        setLocationLoading(false);
+      onLocationSuccess,
+      () => {
+        // High accuracy failed or timed out; try low accuracy/cached
+        tryLowAccuracyFallback();
       },
-      (err) => {
-        setLocationError(`Location unavailable (${err.message}). Proceeding without GPS.`);
-        setLocationLoading(false);
-      },
-      { timeout: 8000, enableHighAccuracy: true }
+      { timeout: 4000, enableHighAccuracy: true, maximumAge: 30000 }
     );
   };
 
-  const handleSendSos = async () => {
-    if (!confirmed) return;
+  const triggerSosDispatch = async () => {
     setSubmitting(true);
-
     try {
+      const fullDescription = [
+        description.trim() || `Urgent ${category} assistance requested.`,
+        manualLocation.trim() ? `[Location Note: ${manualLocation.trim()}]` : ''
+      ].filter(Boolean).join(' ');
+
       const { packet, incident } = protocol.createSosPacket(
         identity,
         category,
-        description.trim() || `Urgent ${category} assistance requested.`,
+        fullDescription,
         includeLocation ? location : undefined
       );
 
@@ -99,6 +176,12 @@ export const SosModal: React.FC<SosModalProps> = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSendSos = async () => {
+    if (!confirmed) return;
+    cancelAutoSubmit();
+    await triggerSosDispatch();
   };
 
   return (
@@ -122,20 +205,86 @@ export const SosModal: React.FC<SosModalProps> = ({
           </button>
         </div>
 
+        {/* 10-Second Auto-Submit Emergency Banner */}
+        {autoSubmitActive ? (
+          <div style={{
+            background: '#EA644B',
+            color: '#FFFFFF',
+            border: '2px solid #292D29',
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            boxShadow: 'var(--shadow-tactile)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={20} className="pulse" />
+              <div>
+                <div style={{ fontWeight: 900, fontSize: '0.88rem', letterSpacing: '0.04em' }}>
+                  AUTO-TRANSMITTING IN {countdown}s
+                </div>
+                <div style={{ fontSize: '0.72rem', opacity: 0.9 }}>
+                  Emergency broadcast will fire automatically
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={cancelAutoSubmit}
+              className="btn-tactile"
+              style={{
+                background: '#FFFFFF',
+                color: '#EA644B',
+                border: '2px solid #292D29',
+                padding: '6px 12px',
+                fontSize: '0.78rem',
+                fontWeight: 800
+              }}
+            >
+              Cancel / Stop
+            </button>
+          </div>
+        ) : (
+          <div style={{ 
+            background: 'var(--color-yellow-tint)', 
+            border: '1.5px solid var(--color-ink)', 
+            padding: '8px 12px', 
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '0.78rem'
+          }}>
+            <span>Auto-dispatch paused. Fill out details and click Transmit.</span>
+            <button
+              type="button"
+              onClick={() => { setAutoSubmitActive(true); setCountdown(10); }}
+              style={{ background: 'none', border: 'underline', color: 'var(--color-ink)', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}
+            >
+              Restart Timer
+            </button>
+          </div>
+        )}
+
         {/* Warning Banner */}
         <div style={{ 
-          background: 'var(--color-yellow-tint)', 
-          border: '1.5px solid var(--color-ink)', 
-          padding: '10px 12px', 
+          background: 'var(--color-paper-card)', 
+          border: '1px solid var(--color-border)', 
+          padding: '8px 12px', 
           borderRadius: 'var(--radius-md)',
           marginBottom: 16,
           display: 'flex',
           gap: 8,
-          fontSize: '0.78rem'
+          fontSize: '0.75rem',
+          color: 'var(--color-ink-muted)'
         }}>
-          <Info size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
-            <strong>Offline Local Transmission:</strong> Broadcasts to compatible nearby WAYLINE devices on the local Wi-Fi / hotspot. Does <em>not</em> connect to 911 or emergency services.
+            Offline Local Transmission: Broadcasts to nearby WAYLINE devices on local Wi-Fi / hotspot. Does not call 911.
           </span>
         </div>
 
@@ -173,10 +322,10 @@ export const SosModal: React.FC<SosModalProps> = ({
             2. DETAILS (PEOPLE COUNT, HAZARDS, INJURIES)
           </label>
           <textarea
-            rows={3}
+            rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g. 2 adults trapped in attic, rising water, need immediate boat extraction..."
+            placeholder="e.g. 2 adults trapped in attic, rising water, need extraction..."
             style={{
               width: '100%',
               padding: 10,
@@ -190,18 +339,18 @@ export const SosModal: React.FC<SosModalProps> = ({
           />
         </div>
 
-        {/* Location Attachment */}
+        {/* Location Attachment & Manual Landmark Fallback */}
         <div style={{ 
           background: 'var(--color-paper-dark)', 
           border: '1.5px solid var(--color-ink)', 
           borderRadius: 'var(--radius-md)', 
           padding: '12px', 
-          marginBottom: 20 
+          marginBottom: 16 
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', fontWeight: 700 }}>
               <MapPin size={16} />
-              <span>Attach Device GPS Coordinates</span>
+              <span>Location / Coordinates</span>
             </div>
             <button
               type="button"
@@ -209,21 +358,42 @@ export const SosModal: React.FC<SosModalProps> = ({
               onClick={handleFetchLocation}
               disabled={locationLoading}
             >
-              {locationLoading ? 'Acquiring...' : location ? 'Re-acquire' : 'Acquire GPS'}
+              {locationLoading ? 'Acquiring...' : location ? 'Re-acquire GPS' : 'Acquire GPS'}
             </button>
           </div>
 
           {location && (
-            <div style={{ marginTop: 8, fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
-              Lat: {location.latitude}, Lng: {location.longitude} (±{location.accuracy}m)
+            <div style={{ marginTop: 8, fontSize: '0.78rem', fontFamily: 'var(--font-mono)', color: '#73966A', fontWeight: 700 }}>
+              ✓ Lat: {location.latitude}, Lng: {location.longitude} (±{location.accuracy}m)
             </div>
           )}
 
           {locationError && (
-            <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#EA644B' }}>
+            <div style={{ marginTop: 6, fontSize: '0.74rem', color: '#EA644B', lineHeight: 1.3 }}>
               {locationError}
             </div>
           )}
+
+          {/* Manual Landmark input when GPS is blocked or phone is indoors */}
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border)' }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: 4, color: 'var(--color-ink-muted)' }}>
+              MANUAL LANDMARK / FLOOR / ROOM (RECOMMENDED IF GPS FAILS):
+            </label>
+            <input
+              type="text"
+              value={manualLocation}
+              onChange={(e) => setManualLocation(e.target.value)}
+              placeholder="e.g. 2nd floor front room, next to red water tank..."
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                fontSize: '0.82rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--color-ink)',
+                background: 'var(--color-paper-card)'
+              }}
+            />
+          </div>
         </div>
 
         {/* Deliberate Confirmation Checkbox */}
@@ -231,7 +401,7 @@ export const SosModal: React.FC<SosModalProps> = ({
           display: 'flex', 
           alignItems: 'center', 
           gap: 10, 
-          marginBottom: 20, 
+          marginBottom: 16, 
           padding: '8px 12px', 
           background: 'var(--color-coral-tint)', 
           borderRadius: 'var(--radius-md)',
@@ -267,7 +437,7 @@ export const SosModal: React.FC<SosModalProps> = ({
             onClick={handleSendSos}
           >
             <ShieldAlert size={18} />
-            {submitting ? 'Broadcasting...' : 'TRANSMIT SOS NOW'}
+            {submitting ? 'Broadcasting...' : autoSubmitActive ? `SEND NOW (${countdown}s)` : 'TRANSMIT SOS NOW'}
           </button>
         </div>
       </div>

@@ -41,20 +41,26 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
+      // 1. Cache-first strategy for immutable hashed Vite assets (/assets/*)
+      if (cachedResponse && url.pathname.startsWith('/assets/')) {
+        return cachedResponse;
+      }
+
+      // 2. Stale-while-revalidate for core shell pages
       if (cachedResponse) {
-        // Return cached and refresh cache in background
         fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          if (networkResponse && networkResponse.status === 200 && (networkResponse.type === 'basic' || networkResponse.type === 'cors')) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse.clone());
             });
           }
-        }).catch(() => {/* Offline */});
+        }).catch(() => {/* Device is offline, cachedResponse is already being returned */});
         return cachedResponse;
       }
 
+      // 3. Network-first with automatic dynamic caching
       return fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        if (networkResponse && networkResponse.status === 200 && (networkResponse.type === 'basic' || networkResponse.type === 'cors')) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
@@ -66,6 +72,8 @@ self.addEventListener('fetch', (event) => {
         if (event.request.mode === 'navigate') {
           return caches.match('/index.html').then(r => r || caches.match('/'));
         }
+        // Fallback for JS/CSS assets if exact hash was missed
+        return caches.match(event.request);
       });
     })
   );

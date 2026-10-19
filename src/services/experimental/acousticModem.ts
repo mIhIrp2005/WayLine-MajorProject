@@ -1,6 +1,7 @@
 // WAYLINE Experimental Acoustic Modem Engine
 // Implements audible 2-FSK acoustic transceiver over standard Web Audio API
-// Completely isolated from production messaging, incidents, and mesh networking
+import { transport } from '../transport';
+import { WaylinePacket } from '../../types';
 
 export interface AcousticFrame {
   version: number;
@@ -528,6 +529,18 @@ export class AcousticModem {
     } else {
       // Normal DATA frame received
       this.onFrameCallbacks.forEach(cb => cb(frame, rawText));
+
+      // Ingest into unified transport pipeline if the payload contains a WaylinePacket or emergency message
+      try {
+        if (rawText.trim().startsWith('{') && rawText.includes('"type"')) {
+          const parsed = JSON.parse(rawText);
+          if (parsed && parsed.id && parsed.type) {
+            transport.processReceivedPacket(parsed as WaylinePacket);
+          }
+        }
+      } catch {
+        // Not a structured JSON packet; remains in acoustic lab frame log
+      }
 
       // Automatic acoustic ACK response if enabled
       if (this.autoAck) {

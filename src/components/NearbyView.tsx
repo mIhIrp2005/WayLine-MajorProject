@@ -12,6 +12,7 @@ import {
   Info
 } from 'lucide-react';
 import { DiscoveredPeer, TransportState, LocalIdentity } from '../types';
+import { transport } from '../services/transport';
 
 interface NearbyViewProps {
   identity: LocalIdentity;
@@ -188,9 +189,19 @@ export const NearbyView: React.FC<NearbyViewProps> = ({
                       <Clock size={12} />
                       Heard {secondsAgo}s ago
                     </span>
-                    <span style={{ fontWeight: 700, color: '#73966A' }}>
-                      Ready for Dispatch
-                    </span>
+                    {peer.transport !== 'DIRECT' ? (
+                      <button
+                        className="btn-tactile btn-sm"
+                        style={{ padding: '3px 8px', fontSize: '0.7rem' }}
+                        onClick={() => transport.connectToPeer(peer.id, peer.name)}
+                      >
+                        Pair Direct Link
+                      </button>
+                    ) : (
+                      <span style={{ fontWeight: 700, color: '#73966A' }}>
+                        Direct P2P Link Active
+                      </span>
+                    )}
                   </div>
                 </div>
               );

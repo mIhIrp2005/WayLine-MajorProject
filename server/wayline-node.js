@@ -92,10 +92,11 @@ function getNetworkInterfaces() {
 const activeInterfaces = getNetworkInterfaces();
 const primaryIface = activeInterfaces[0] || { name: 'Loopback', address: '127.0.0.1', broadcast: '255.255.255.255' };
 const LOCAL_IP = primaryIface.address;
+const IS_VERBOSE = process.argv.includes('--verbose');
 
 console.log(`[WAYLINE] Primary Interface: ${primaryIface.name} (${LOCAL_IP})`);
-if (activeInterfaces.length > 1) {
-  console.log(`[WAYLINE] Detected other adapters: ${activeInterfaces.slice(1).map(i => `${i.name}: ${i.address}`).join(', ')}`);
+if (IS_VERBOSE && activeInterfaces.length > 1) {
+  console.log(`[WAYLINE] Other adapters: ${activeInterfaces.slice(1).map(i => `${i.name}: ${i.address}`).join(', ')}`);
 }
 console.log(`[WAYLINE] Starting node ${NODE_ID} (${NODE_NAME}) on ${LOCAL_IP}:${HTTP_PORT}`);
 
@@ -157,7 +158,12 @@ const server = http.createServer((req, res) => {
 });
 
 // --- 2. WebSocket Server for UI Clients and Peer Nodes ---
-const wss = new WebSocketServer({ server });
+// Defensive limit: 64 KiB maximum frame payload to prevent denial of service
+const MAX_WS_PAYLOAD = 64 * 1024;
+const wss = new WebSocketServer({ 
+  server, 
+  maxPayload: MAX_WS_PAYLOAD 
+});
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -174,7 +180,9 @@ wss.on('connection', (ws, req) => {
       nodeId: clientNodeId,
       nodeName: clientNodeName,
       ip: clientIp,
-      lastSeen: Date.now()
+      lastSeen: Date.now(),
+      messageCount: 0,
+      windowStart: Date.now()
     };
 
     registeredClients.set(ws, clientInfo);
@@ -192,18 +200,48 @@ wss.on('connection', (ws, req) => {
     // Broadcast updated peer list to all clients so they immediately see each other!
     broadcastPeersToClients();
 
-    ws.on('message', (data) => {
+    ws.on('message', (data, isBinary) => {
+      // 1. Reject binary data immediately
+      if (isBinary) {
+        ws.send(JSON.stringify({ type: 'ERROR', message: 'Binary frames not supported' }));
+        return;
+      }
+
+      // 2. Reject raw frame sizes exceeding 64 KiB
+      if (data.length > MAX_WS_PAYLOAD) {
+        ws.send(JSON.stringify({ type: 'ERROR', message: 'Payload exceeds 64KB limit' }));
+        return;
+      }
+
+      // 3. Per-connection rate limit: max 20 messages per second
+      const now = Date.now();
+      if (now - clientInfo.windowStart < 1000) {
+        clientInfo.messageCount++;
+        if (clientInfo.messageCount > 20) {
+          ws.send(JSON.stringify({ type: 'ERROR', message: 'Rate limit exceeded (max 20 msg/s)' }));
+          return;
+        }
+      } else {
+        clientInfo.windowStart = now;
+        clientInfo.messageCount = 1;
+      }
+
       try {
-        const msg = JSON.parse(data.toString());
+        const msg = JSON.parse(data.toString('utf8'));
+        if (!msg || typeof msg !== 'object' || !msg.type) {
+          ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid message structure' }));
+          return;
+        }
+
         if (msg.type === 'CLIENT_REGISTER') {
-          if (msg.nodeId) clientInfo.nodeId = msg.nodeId;
-          if (msg.nodeName) clientInfo.nodeName = msg.nodeName;
+          if (typeof msg.nodeId === 'string' && msg.nodeId.length <= 64) clientInfo.nodeId = msg.nodeId;
+          if (typeof msg.nodeName === 'string' && msg.nodeName.length <= 64) clientInfo.nodeName = msg.nodeName;
           broadcastPeersToClients();
         } else {
           handleClientMessage(msg, ws);
         }
       } catch (err) {
-        console.error('[WAYLINE] Invalid client JSON:', err.message);
+        ws.send(JSON.stringify({ type: 'ERROR', message: 'Malformed JSON payload' }));
       }
     });
 
@@ -348,6 +386,26 @@ function handleClientMessage(msg, clientWs) {
       transmittedCount: sentCount,
       timestamp: Date.now()
     }));
+  } else if (msg.type === 'SIGNALING') {
+    // WebRTC Signaling Relay between browser clients (Offers, Answers, ICE candidates)
+    const { targetPeerId, signal, senderId } = msg;
+    if (!targetPeerId || !signal) return;
+
+    const senderClient = registeredClients.get(clientWs);
+    const resolvedSenderId = senderId || senderClient?.nodeId || 'unknown';
+    const resolvedSenderName = senderClient?.nodeName || 'Peer';
+
+    for (const [ws, client] of registeredClients.entries()) {
+      if (client.nodeId === targetPeerId && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'SIGNALING',
+          senderId: resolvedSenderId,
+          senderName: resolvedSenderName,
+          signal
+        }));
+        break;
+      }
+    }
   } else if (msg.type === 'REFRESH_DISCOVERY') {
     broadcastUdpBeacon();
     broadcastPeersToClients();

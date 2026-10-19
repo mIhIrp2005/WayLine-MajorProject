@@ -130,6 +130,7 @@ export const App: React.FC = () => {
             messages={messages}
             peers={peers}
             onMessageSent={loadData}
+            onTriggerSos={() => setIsSosOpen(true)}
           />
         )}
 

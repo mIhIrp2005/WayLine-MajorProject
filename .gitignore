@@ -1,4 +1,25 @@
 node_modules
 dist
-.DS_Store
+dist-ssr
+*.local
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Environment & certs
+.env*.local
+*.pfx
+*.pem
+*.crt
+*.key
+
+# Editor & OS files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+

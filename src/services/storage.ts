@@ -2,7 +2,7 @@
 import { StoredMessage, EmergencyIncident, DiscoveredPeer, LocalIdentity } from '../types';
 
 const DB_NAME = 'wayline_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class WaylineStorage {
   private dbPromise: Promise<IDBDatabase> | null = null;
@@ -37,6 +37,12 @@ class WaylineStorage {
 
         if (!db.objectStoreNames.contains('identity')) {
           db.createObjectStore('identity', { keyPath: 'key' });
+        }
+
+        // Schema v2: Durable Deduplication Store
+        if (!db.objectStoreNames.contains('dedup')) {
+          const dedupStore = db.createObjectStore('dedup', { keyPath: 'packetId' });
+          dedupStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
       };
 
@@ -208,14 +214,99 @@ class WaylineStorage {
     });
   }
 
+  // --- Durable Deduplication ---
+  async saveSeenPacket(packetId: string, timestamp: number = Date.now()): Promise<void> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('dedup', 'readwrite');
+        tx.objectStore('dedup').put({ packetId, timestamp });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve(); // Non-blocking if storage error
+      });
+    } catch {
+      // Safe fallback if IDB unavailable
+    }
+  }
+
+  async getRecentSeenPackets(limit: number = 2000): Promise<string[]> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('dedup', 'readonly');
+        const store = tx.objectStore('dedup');
+        const req = store.getAll();
+        req.onsuccess = () => {
+          const list = (req.result || [])
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, limit)
+            .map((item: any) => item.packetId);
+          resolve(list);
+        };
+        req.onerror = () => resolve([]);
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  async pruneOldSeenPackets(maxAgeMs: number = 86400000): Promise<void> {
+    try {
+      const db = await this.getDB();
+      const cutoff = Date.now() - maxAgeMs;
+      return new Promise((resolve) => {
+        const tx = db.transaction('dedup', 'readwrite');
+        const store = tx.objectStore('dedup');
+        const index = store.index('timestamp');
+        const range = IDBKeyRange.upperBound(cutoff);
+        const req = index.openCursor(range);
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {
+      // Safe fallback
+    }
+  }
+
+  // --- Outbox Pending Messages ---
+  async getPendingOutboxMessages(): Promise<StoredMessage[]> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('messages', 'readonly');
+        const store = tx.objectStore('messages');
+        const req = store.getAll();
+        req.onsuccess = () => {
+          const pending = (req.result as StoredMessage[] || []).filter(
+            m => m.status === 'SAVED_LOCALLY' || m.status === 'QUEUED'
+          );
+          resolve(pending);
+        };
+        req.onerror = () => resolve([]);
+      });
+    } catch {
+      return [];
+    }
+  }
+
   // --- Clear / Reset ---
   async clearAllData(): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(['messages', 'incidents', 'peers'], 'readwrite');
+      const tx = db.transaction(['messages', 'incidents', 'peers', 'dedup'], 'readwrite');
       tx.objectStore('messages').clear();
       tx.objectStore('incidents').clear();
       tx.objectStore('peers').clear();
+      if (tx.objectStoreNames.contains('dedup')) {
+        tx.objectStore('dedup').clear();
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

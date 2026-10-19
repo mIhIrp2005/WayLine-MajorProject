@@ -81,7 +81,27 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
       <div className="page-header">
         <div className="page-title-group">
           <h1>Field Desk</h1>
-          <p>Local emergency mesh status for <span style={{ fontWeight: 700, color: 'var(--color-ink)' }}>{identity.nodeName}</span></p>
+          <p>
+            Local emergency mesh status for{' '}
+            <button
+              type="button"
+              onClick={() => onNavigateTab('settings')}
+              title="Click to change your callsign / name"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontWeight: 800,
+                color: 'var(--color-ink)',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 'inherit'
+              }}
+            >
+              {identity.nodeName} ✎
+            </button>
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button 

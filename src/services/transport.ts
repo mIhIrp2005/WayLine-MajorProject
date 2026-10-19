@@ -1,8 +1,7 @@
-// WAYLINE Client Transport Service
-// Bridges React UI with the local WAYLINE Node Companion & IndexedDB persistence
 import { WaylinePacket, DiscoveredPeer, TransportState, LocalIdentity, StoredMessage, EmergencyIncident } from '../types';
 import { storage } from './storage';
 import { protocol } from './protocol';
+import { WebRTCTransportManager } from './transports/webrtcTransport';
 
 type Listener = () => void;
 
@@ -11,6 +10,7 @@ class WaylineTransportService {
   private listeners: Set<Listener> = new Set();
   private reconnectTimer: any = null;
   private identity: LocalIdentity | null = null;
+  public webrtc: WebRTCTransportManager;
 
   public state: TransportState = {
     isCompanionConnected: false,
@@ -26,11 +26,16 @@ class WaylineTransportService {
   public peers: DiscoveredPeer[] = [];
 
   constructor() {
+    this.webrtc = new WebRTCTransportManager(
+      (packet) => this.processReceivedPacket(packet),
+      () => this.updatePeersFromTransports()
+    );
     this.init();
   }
 
   private async init() {
     this.identity = await storage.getOrCreateIdentity();
+    this.webrtc.setIdentity(this.identity.nodeId, this.identity.nodeName);
     this.connectCompanion();
   }
 
@@ -73,6 +78,10 @@ class WaylineTransportService {
             nodeName: this.identity.nodeName
           }));
         }
+
+        // Automatically flush pending outbox messages over newly available transport
+        this.flushOutboxQueue();
+
         this.notify();
       };
 
@@ -123,12 +132,24 @@ class WaylineTransportService {
       this.notify();
     } else if (data.type === 'PEERS_UPDATED') {
       this.peers = data.peers || [];
-      this.state.peerCount = this.peers.filter(p => p.status === 'CONNECTED').length;
+      this.updatePeersFromTransports();
       // Persist peers to IndexedDB
       for (const peer of this.peers) {
         await storage.savePeer(peer);
       }
       this.notify();
+    } else if (data.type === 'SIGNALING') {
+      // Inbound WebRTC handshake from peer via host relay
+      const { senderId, senderName, signal } = data;
+      this.webrtc.handleSignal(senderId, senderName, signal, (outgoingSignal) => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({
+            type: 'SIGNALING',
+            targetPeerId: senderId,
+            signal: outgoingSignal
+          }));
+        }
+      });
     } else if (data.type === 'PACKET_RECEIVED') {
       await this.processReceivedPacket(data.packet);
     } else if (data.type === 'SEND_RESULT') {
@@ -139,11 +160,27 @@ class WaylineTransportService {
     }
   }
 
-  // Handle packet received from a peer
-  private async processReceivedPacket(packet: WaylinePacket) {
-    if (!protocol.validatePacket(packet)) return;
-    if (this.identity && packet.senderId === this.identity.nodeId) return; // Ignore own echoes
+  // Merge direct WebRTC peers with daemon LAN peers
+  public updatePeersFromTransports() {
+    const directPeers = this.webrtc.getConnectedPeers();
+    const existingIds = new Set(this.peers.map(p => p.id));
+    
+    for (const dp of directPeers) {
+      if (!existingIds.has(dp.id)) {
+        this.peers.push(dp);
+      }
+    }
+    this.state.peerCount = this.peers.filter(p => p.status === 'CONNECTED').length;
+    this.notify();
+  }
 
+  // Handle packet received from any transport (WebSocket, WebRTC, Acoustic)
+  public async processReceivedPacket(packet: WaylinePacket): Promise<boolean> {
+    if (!protocol.validatePacket(packet)) return false;
+    if (this.identity && packet.senderId === this.identity.nodeId) return false; // Ignore own echoes
+    if (protocol.isDuplicate(packet.id)) return false; // Deduplication drop
+
+    protocol.markSeen(packet.id);
     this.state.packetsReceived++;
 
     if (packet.type === 'CHAT') {
@@ -202,23 +239,114 @@ class WaylineTransportService {
         this.notify();
       }
     }
+
+    // Phone A -> Phone B -> Phone C store-and-forward relay:
+    // If packet has hops remaining and is broadcast or not addressed exclusively to us, forward to other peers!
+    const relayPacket = protocol.prepareRelayPacket(packet);
+    if (relayPacket) {
+      console.log(`[Transport] Relaying packet [${packet.id}] (hop ${relayPacket.hopCount}/${relayPacket.ttl}) across connected peers`);
+      this.webrtc.broadcastPacket(relayPacket);
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({ type: 'SEND_PACKET', packet: relayPacket }));
+      }
+    }
+
+    return true;
   }
 
-  // Send a packet via the companion or save locally
+  // Automatic Outbox Scheduler: Flush pending/saved messages when transport is ready
+  private isFlushingOutbox = false;
+  public async flushOutboxQueue(): Promise<void> {
+    if (this.isFlushingOutbox) return;
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+
+    this.isFlushingOutbox = true;
+    try {
+      const pending = await storage.getPendingOutboxMessages();
+      if (pending.length === 0) return;
+
+      console.log(`[Transport] Flushing outbox queue: ${pending.length} pending messages...`);
+
+      // Stream up to 10 messages per batch with delay to avoid flooding
+      const batch = pending.slice(0, 10);
+      for (const msg of batch) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) break;
+
+        // Skip messages older than 24 hours (expired)
+        if (Date.now() - msg.timestamp > 86400000) {
+          await storage.updateMessageStatus(msg.id, 'EXPIRED');
+          continue;
+        }
+
+        const packet: WaylinePacket = {
+          version: 1,
+          id: msg.id,
+          type: msg.type,
+          senderId: msg.senderId,
+          senderName: msg.senderName,
+          recipientId: msg.recipientId,
+          timestamp: msg.timestamp,
+          ttl: msg.ttl,
+          hopCount: msg.hopCount,
+          payload: { content: msg.content }
+        };
+        packet.signature = protocol.calculateChecksum(packet);
+
+        this.socket.send(JSON.stringify({
+          type: 'SEND_PACKET',
+          packet
+        }));
+
+        // Bounded delay between sends
+        await new Promise(r => setTimeout(r, 60));
+      }
+    } catch (e: any) {
+      console.warn('[Transport] Error flushing outbox queue:', e.message);
+    } finally {
+      this.isFlushingOutbox = false;
+      this.notify();
+    }
+  }
+
+  // Send a packet via all available transports (WebSocket host & direct WebRTC peer channels)
   public async sendPacket(packet: WaylinePacket): Promise<void> {
     this.state.packetsSent++;
+    let transmittedCount = 0;
 
+    // 1. Direct WebRTC DataChannels (genuine phone-to-phone links)
+    const webrtcSent = this.webrtc.broadcastPacket(packet);
+    transmittedCount += webrtcSent;
+
+    // 2. Local Node Companion WebSocket
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({
         type: 'SEND_PACKET',
         packet
       }));
-    } else {
-      // Companion offline - message remains stored locally
-      console.log(`[Transport] Companion offline. Packet [${packet.id}] preserved locally.`);
-      await storage.updateMessageStatus(packet.id, 'SAVED_LOCALLY');
-      this.notify();
+      transmittedCount++;
     }
+
+    if (transmittedCount > 0) {
+      await storage.updateMessageStatus(packet.id, 'TRANSMITTED');
+    } else {
+      // No active transports online - message safely preserved in local outbox
+      console.log(`[Transport] All transports offline. Packet [${packet.id}] queued locally.`);
+      await storage.updateMessageStatus(packet.id, 'SAVED_LOCALLY');
+    }
+    this.notify();
+  }
+
+  // Connect to a peer via direct WebRTC signaling
+  public connectToPeer(peerId: string, peerName: string) {
+    this.webrtc.initiateConnection(peerId, peerName, (signal) => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({
+          type: 'SIGNALING',
+          targetPeerId: peerId,
+          signal
+        }));
+      }
+    });
   }
 
   // Trigger manual discovery beacon broadcast

@@ -188,6 +188,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Radio & Browser Capability Diagnostics (Web Bluetooth & PWA) */}
+        <div className="bento-card col-span-12">
+          <div className="card-header">
+            <span className="card-title">
+              <Radio size={16} />
+              BROWSER RADIO CAPABILITIES & HARDWARE PROBE
+            </span>
+            <span className={`pill ${typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'pill-blue' : 'pill-yellow'}`}>
+              {typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'CLIENT API PRESENT' : 'UNAVAILABLE'}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', lineHeight: 1.5, color: 'var(--color-ink)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
+              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+                <strong>Web Bluetooth API:</strong> {typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'Available (Client Central Role only)' : 'Not supported by this browser'}
+              </div>
+              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+                <strong>Phone-to-Phone BLE Mesh:</strong> <span style={{ color: '#EA644B', fontWeight: 700 }}>Unsupported in Web Standards</span>
+              </div>
+              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+                <strong>Zero-Install P2P Transports:</strong> Wi-Fi WebSockets & Acoustic 2-FSK Modem
+              </div>
+            </div>
+
+            <p style={{ color: 'var(--color-ink-muted)', fontSize: '0.78rem' }}>
+              <strong>Truthful Hardware Notice:</strong> The W3C Web Bluetooth specification only permits browser web pages to connect outward as a <em>Central / Client</em> to pre-existing Bluetooth hardware (e.g., an ESP32 micro-controller or LoRa bridge). Browsers cannot act as BLE Peripheral Advertisers or host GATT Servers to form an automatic zero-install phone mesh. Phone-to-phone communication in WAYLINE is achieved over shared Wi-Fi hotspots and ultrasonic/audio pulses.
+            </p>
+          </div>
+        </div>
+
         {/* Experimental Acoustic Lab Navigation Card */}
         {onOpenAcousticLab && (
           <div className="bento-card col-span-12">
