@@ -172,47 +172,44 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
-        gap: 10, 
-        padding: '10px 14px', 
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8, 
+        padding: '10px 12px', 
         background: 'var(--color-paper-card)', 
         border: '2px solid var(--color-ink)', 
         borderRadius: 'var(--radius-md)', 
         marginBottom: 16,
         boxShadow: 'var(--shadow-tactile)'
       }}>
-        <span style={{ fontSize: '0.8rem', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
-          DISPATCH TARGET:
-        </span>
-        <select
-          value={selectedRecipient}
-          onChange={(e) => setSelectedRecipient(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            border: '1.5px solid var(--color-ink)',
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--color-paper)',
-            fontWeight: 700,
-            fontSize: '0.85rem',
-            cursor: 'pointer'
-          }}
-        >
-          <option value="*">Broadcast to All Nearby (*)</option>
-          {connectedPeers.map(p => (
-            <option key={p.id} value={p.id}>{p.name} ({p.address})</option>
-          ))}
-        </select>
-        {selectedRecipient === '*' ? (
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-ink-muted)' }}>
-            Relayed across all connected devices (Max 3 hops)
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 180px' }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
+            TO:
           </span>
-        ) : (
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-green)', fontWeight: 700 }}>
-            Direct addressed node transmission
-          </span>
-        )}
+          <select
+            value={selectedRecipient}
+            onChange={(e) => setSelectedRecipient(e.target.value)}
+            style={{
+              flex: 1,
+              minWidth: 130,
+              padding: '6px 10px',
+              border: '1.5px solid var(--color-ink)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-paper)',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="*">Broadcast to All Nearby (*)</option>
+            {connectedPeers.map(p => (
+              <option key={p.id} value={p.id}>{p.name} ({p.address})</option>
+            ))}
+          </select>
+        </div>
 
         {/* AES Encryption Toggle & Key Input */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn-tactile btn-sm"
@@ -236,7 +233,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               value={encryptionKey}
               onChange={(e) => setEncryptionKey(e.target.value)}
               style={{
-                width: 130,
+                width: 110,
                 padding: '4px 8px',
                 fontSize: '0.75rem',
                 borderRadius: 'var(--radius-sm)',
@@ -268,10 +265,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             maxWidth: 360,
             padding: 20
           }}>
-            <Radio size={36} style={{ marginBottom: 12, opacity: 0.5 }} />
-            <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-ink)' }}>No Messages on This Node</h3>
-            <p style={{ fontSize: '0.82rem', marginTop: 6, lineHeight: 1.4 }}>
-              Compose an update below. Messages are saved in your device's IndexedDB and immediately transmitted to any discovered peers on the Wi-Fi subnet.
+            <Radio size={32} style={{ marginBottom: 8, opacity: 0.4 }} />
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-ink)' }}>No Messages Yet</h3>
+            <p style={{ fontSize: '0.8rem', marginTop: 4 }}>
+              Send an update below to broadcast to nearby mesh peers.
             </p>
           </div>
         ) : (
@@ -319,15 +316,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       </div>
 
       {/* Message Composer */}
-      <form onSubmit={handleSendMessage} style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+      <form onSubmit={handleSendMessage} style={{ marginTop: 12, display: 'flex', gap: 8 }}>
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder={connectedPeers.length > 0 ? "Type emergency update or status..." : "No peers connected — message will be saved locally..."}
+          placeholder={connectedPeers.length > 0 ? "Type emergency update..." : "Saved locally (offline)..."}
           style={{
             flex: 1,
-            padding: '12px 16px',
+            minWidth: 0,
+            padding: '10px 14px',
             borderRadius: 'var(--radius-md)',
             border: '2px solid var(--color-ink)',
             background: 'var(--color-paper-card)',
@@ -340,10 +338,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           type="submit"
           className="btn-tactile btn-coral"
           disabled={!inputText.trim() || sending || cooldown > 0}
-          style={{ minWidth: 100 }}
+          style={{ padding: '10px 16px', flexShrink: 0 }}
         >
           <Send size={16} />
-          {sending ? 'Sending...' : cooldown > 0 ? `Wait ${cooldown}s` : 'Send'}
+          <span>{sending ? '...' : cooldown > 0 ? `${cooldown}s` : 'Send'}</span>
         </button>
       </form>
     </div>

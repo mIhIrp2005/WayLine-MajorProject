@@ -293,7 +293,7 @@ export const SosModal: React.FC<SosModalProps> = ({
           <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: 8, fontFamily: 'var(--font-mono)' }}>
             1. SELECT EMERGENCY CATEGORY
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
             {categories.map((c) => (
               <button
                 key={c.key}
@@ -420,11 +420,11 @@ export const SosModal: React.FC<SosModalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn-tactile"
-            style={{ flex: 1 }}
+            style={{ flex: '1 1 100px' }}
             onClick={onClose}
           >
             Cancel
@@ -432,7 +432,7 @@ export const SosModal: React.FC<SosModalProps> = ({
           <button
             type="button"
             className="btn-tactile btn-coral"
-            style={{ flex: 2 }}
+            style={{ flex: '2 1 180px' }}
             disabled={!confirmed || submitting}
             onClick={handleSendSos}
           >

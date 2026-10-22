@@ -113,6 +113,17 @@ const mimeTypes = {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   
+  // CORS Preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': '*'
+    });
+    res.end();
+    return;
+  }
+
   // Captive Portal Probe Redirects (Android, iOS, Windows)
   if (/generate_204|gen_204|hotspot-detect\.html|connecttest\.txt|ncsi\.txt/i.test(url.pathname)) {
     const target = `http://${LOCAL_IP}:${HTTP_PORT}/`;
@@ -121,15 +132,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Basic health/diagnostic endpoint
+  // Dynamic health and subnet discovery endpoint
   if (url.pathname === '/api/status') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    const currentIfaces = getNetworkInterfaces();
+    const primary = currentIfaces[0] || primaryIface;
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': '*'
+    });
     res.end(JSON.stringify({
       nodeId: NODE_ID,
       nodeName: NODE_NAME,
-      localIp: LOCAL_IP,
+      localIp: primary.address,
       httpPort: HTTP_PORT,
       udpPort: UDP_PORT,
+      interfaces: currentIfaces.map(i => ({ name: i.name, ip: i.address, url: `http://${i.address}:${HTTP_PORT}` })),
       peerCount: peerSockets.size,
       discoveredCount: discoveredPeers.size
     }));
@@ -189,12 +208,16 @@ wss.on('connection', (ws, req) => {
     clientSockets.add(ws);
     console.log(`[WAYLINE] Browser UI connected: ${clientInfo.nodeName} (${clientInfo.nodeId}) [${clientSockets.size} active]`);
 
-    // Send initial status to this client
+    // Send initial status with dynamically refreshed network interfaces
+    const currentIfaces = getNetworkInterfaces();
+    const primary = currentIfaces[0] || primaryIface;
     ws.send(JSON.stringify({
       type: 'NODE_STATUS',
       nodeId: NODE_ID,
       nodeName: NODE_NAME,
-      listeningAddress: `${LOCAL_IP}:${HTTP_PORT}`
+      listeningAddress: `${primary.address}:${HTTP_PORT}`,
+      localIp: primary.address,
+      interfaces: currentIfaces.map(i => ({ name: i.name, ip: i.address, url: `http://${i.address}:${HTTP_PORT}` }))
     }));
 
     // Broadcast updated peer list to all clients so they immediately see each other!

@@ -84,6 +84,12 @@ export interface LocalIdentity {
   created: number;
 }
 
+export interface NetworkInterfaceInfo {
+  name: string;
+  ip: string;
+  url: string;
+}
+
 export interface TransportState {
   isCompanionConnected: boolean;
   activeTransport: string;
@@ -93,4 +99,6 @@ export interface TransportState {
   packetsSent: number;
   packetsReceived: number;
   lastError: string | null;
+  availableInterfaces?: NetworkInterfaceInfo[];
+  customHost?: string;
 }

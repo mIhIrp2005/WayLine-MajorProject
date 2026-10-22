@@ -20,7 +20,9 @@ class WaylineTransportService {
     isScanning: false,
     packetsSent: 0,
     packetsReceived: 0,
-    lastError: null
+    lastError: null,
+    availableInterfaces: [],
+    customHost: typeof localStorage !== 'undefined' ? localStorage.getItem('wayline_host_override') || '' : ''
   };
 
   public peers: DiscoveredPeer[] = [];
@@ -48,15 +50,123 @@ class WaylineTransportService {
     this.listeners.forEach(cb => cb());
   }
 
+  // Retrieve current target host (custom override, browser host, or loopback)
+  public getTargetHost(): string {
+    const override = typeof localStorage !== 'undefined' ? localStorage.getItem('wayline_host_override') : null;
+    if (override && override.trim()) return override.trim();
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    return host || 'localhost';
+  }
+
+  // Set or clear custom host target (allows switching host without rebuilding)
+  public setHostOverride(host: string | null) {
+    if (typeof localStorage !== 'undefined') {
+      if (host && host.trim()) {
+        const clean = host.trim().replace(/^https?:\/\//i, '').replace(/:\d+$/, '');
+        localStorage.setItem('wayline_host_override', clean);
+        this.state.customHost = clean;
+      } else {
+        localStorage.removeItem('wayline_host_override');
+        this.state.customHost = '';
+      }
+    }
+    this.notify();
+    this.connectCompanion();
+  }
+
+  // Dynamic subnet and gateway auto-discovery (finds host even when host isn't giving the hotspot)
+  public async autoDiscoverHost(): Promise<string | null> {
+    this.state.isScanning = true;
+    this.state.lastError = 'Scanning network for active WAYLINE host...';
+    this.notify();
+
+    const probe = async (hostIp: string): Promise<string | null> => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 600);
+        const res = await fetch(`http://${hostIp}:8765/api/status`, {
+          signal: controller.signal,
+          mode: 'cors'
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.nodeId) return hostIp;
+        }
+      } catch {}
+      return null;
+    };
+
+    // 1. Common hotspot gateways & mDNS
+    const candidates = [
+      '192.168.43.1',   // Android Hotspot gateway
+      '192.168.137.1',  // Windows Hotspot gateway
+      '192.168.1.1',    // Router default 1
+      '192.168.0.1',    // Router default 2
+      '10.0.0.1',       // Alternate router gateway
+      'wayline.local'   // mDNS query
+    ];
+
+    if (typeof window !== 'undefined' && window.location?.hostname && !candidates.includes(window.location.hostname)) {
+      candidates.unshift(window.location.hostname);
+    }
+
+    const gatewayChecks = await Promise.all(candidates.map(c => probe(c)));
+    const foundGateway = gatewayChecks.find(Boolean);
+    if (foundGateway) {
+      console.log(`[Transport] Discovered active host at ${foundGateway}`);
+      this.setHostOverride(foundGateway);
+      this.state.isScanning = false;
+      this.state.lastError = null;
+      this.notify();
+      return foundGateway;
+    }
+
+    // 2. Subnet sweep for when host is NOT the hotspot gateway (e.g. laptop connected to phone hotspot)
+    const baseSubnets = ['192.168.43', '192.168.137', '192.168.0', '192.168.1'];
+    const currentHost = this.state.customHost || (typeof window !== 'undefined' ? window.location.hostname : '');
+    const match = currentHost.match(/^(\d+\.\d+\.\d+)\./);
+    if (match && !baseSubnets.includes(match[1])) {
+      baseSubnets.unshift(match[1]);
+    }
+
+    for (const subnet of baseSubnets.slice(0, 2)) {
+      const targets: string[] = [];
+      for (let i = 2; i <= 35; i++) targets.push(`${subnet}.${i}`);
+      for (let i = 100; i <= 115; i++) targets.push(`${subnet}.${i}`);
+
+      const batchSize = 10;
+      for (let i = 0; i < targets.length; i += batchSize) {
+        const batch = targets.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(ip => probe(ip)));
+        const matchIp = results.find(Boolean);
+        if (matchIp) {
+          console.log(`[Transport] Subnet sweep found host at ${matchIp}`);
+          this.setHostOverride(matchIp);
+          this.state.isScanning = false;
+          this.state.lastError = null;
+          this.notify();
+          return matchIp;
+        }
+      }
+    }
+
+    this.state.isScanning = false;
+    this.state.lastError = 'No host found on local network. Enter IP manually or scan QR.';
+    this.notify();
+    return null;
+  }
+
   // Attempt connection to the local Node companion
   private connectCompanion() {
     if (this.socket) {
       try { this.socket.close(); } catch (e) {}
     }
 
-    const host = window.location.hostname || 'localhost';
-    // Use the port the page was loaded from, or default to 8765
-    const port = window.location.port && window.location.port !== '5173' ? window.location.port : '8765';
+    const host = this.getTargetHost();
+    const port = (typeof window !== 'undefined' && window.location.port && window.location.port !== '5173') 
+      ? window.location.port 
+      : '8765';
     const nodeId = this.identity?.nodeId || '';
     const nodeName = this.identity?.nodeName || '';
     const wsUrl = `ws://${host}:${port}/client?type=client&nodeId=${encodeURIComponent(nodeId)}&nodeName=${encodeURIComponent(nodeName)}`;
@@ -69,7 +179,7 @@ class WaylineTransportService {
         this.state.activeTransport = 'UDP Local Wi-Fi Mesh Adapter';
         this.state.isScanning = true;
         this.state.lastError = null;
-        console.log('[Transport] Connected to WAYLINE local companion');
+        console.log(`[Transport] Connected to WAYLINE companion at ${host}:${port}`);
         
         if (this.identity) {
           this.socket?.send(JSON.stringify({
@@ -112,7 +222,7 @@ class WaylineTransportService {
         this.state.isCompanionConnected = false;
         this.state.activeTransport = 'Offline Local Storage Mode';
         this.state.listeningAddress = 'Local node unreachable';
-        this.state.lastError = 'Local node daemon not running on port 8765';
+        this.state.lastError = `Host ${host}:${port} unreachable`;
         this.notify();
       };
     } catch (e: any) {
@@ -127,6 +237,7 @@ class WaylineTransportService {
   private async handleCompanionMessage(data: any) {
     if (data.type === 'NODE_STATUS') {
       this.state.listeningAddress = data.listeningAddress;
+      this.state.availableInterfaces = data.interfaces || [];
       this.peers = data.peers || [];
       this.state.peerCount = this.peers.filter(p => p.status === 'CONNECTED').length;
       this.notify();

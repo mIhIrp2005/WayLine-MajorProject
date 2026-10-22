@@ -139,6 +139,7 @@ export const App: React.FC = () => {
             identity={identity}
             transportState={transportState}
             peers={peers}
+            messages={messages}
             onRefreshDiscovery={() => transport.triggerDiscoveryRefresh()}
           />
         )}

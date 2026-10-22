@@ -194,4 +194,96 @@ export class WebRTCTransportManager {
     }
     return list;
   }
+
+  // 1. Offline Air-Gapped Invitation (Offer)
+  public async createOfflineOffer(targetPeerName: string = 'Air-Gapped Peer'): Promise<{ offerToken: string; peerId: string }> {
+    const peerId = `offline-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const peer = this.getOrCreatePeer(peerId, targetPeerName);
+    const dc = peer.pc.createDataChannel('wayline-mesh', { ordered: true });
+    this.setupDataChannel(peer, dc);
+
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+
+    // Wait for local ICE gathering to complete so all host candidates are in the SDP
+    await new Promise<void>((resolve) => {
+      if (peer.pc.iceGatheringState === 'complete') {
+        resolve();
+      } else {
+        const checkState = () => {
+          if (peer.pc.iceGatheringState === 'complete') {
+            peer.pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        };
+        peer.pc.addEventListener('icegatheringstatechange', checkState);
+        setTimeout(resolve, 1500);
+      }
+    });
+
+    const payload = {
+      type: 'OFFER',
+      peerId: this.localNodeId || 'node-a',
+      peerName: this.localNodeName || 'Nearby Node',
+      sdp: peer.pc.localDescription?.sdp
+    };
+
+    const offerToken = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    return { offerToken, peerId };
+  }
+
+  // 2. Offline Air-Gapped Acceptance (Answer)
+  public async acceptOfflineOffer(offerToken: string): Promise<{ answerToken: string; peerId: string }> {
+    const raw = decodeURIComponent(escape(atob(offerToken.trim())));
+    const payload = JSON.parse(raw);
+    const peer = this.getOrCreatePeer(payload.peerId, payload.peerName || 'Remote Peer');
+
+    await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }));
+    const answer = await peer.pc.createAnswer();
+    await peer.pc.setLocalDescription(answer);
+
+    await new Promise<void>((resolve) => {
+      if (peer.pc.iceGatheringState === 'complete') {
+        resolve();
+      } else {
+        const checkState = () => {
+          if (peer.pc.iceGatheringState === 'complete') {
+            peer.pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        };
+        peer.pc.addEventListener('icegatheringstatechange', checkState);
+        setTimeout(resolve, 1500);
+      }
+    });
+
+    const answerPayload = {
+      type: 'ANSWER',
+      peerId: this.localNodeId || 'node-b',
+      peerName: this.localNodeName || 'Nearby Node',
+      sdp: peer.pc.localDescription?.sdp
+    };
+
+    const answerToken = btoa(unescape(encodeURIComponent(JSON.stringify(answerPayload))));
+    return { answerToken, peerId: payload.peerId };
+  }
+
+  // 3. Finalize Offline Pairing with Answer
+  public async finalizeOfflineAnswer(answerToken: string, peerId?: string): Promise<void> {
+    const raw = decodeURIComponent(escape(atob(answerToken.trim())));
+    const payload = JSON.parse(raw);
+    const targetId = peerId || payload.peerId;
+    const peer = this.peers.get(targetId);
+    if (!peer) {
+      // If peerId was ephemeral on Node A, find by connection state
+      const firstConnecting = Array.from(this.peers.values()).find(p => p.status === 'CONNECTING');
+      if (firstConnecting) {
+        await firstConnecting.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }));
+        return;
+      }
+      throw new Error(`Peer connection ${targetId} not found`);
+    }
+
+    await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }));
+  }
 }

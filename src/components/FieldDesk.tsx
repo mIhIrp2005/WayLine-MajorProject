@@ -4,15 +4,11 @@ import {
   ShieldAlert, 
   Users, 
   MessageSquare, 
-  AlertTriangle, 
-  HardDrive, 
   Wifi, 
   WifiOff, 
   CheckCircle2, 
   ArrowRight, 
-  Compass, 
   RefreshCw, 
-  Clock, 
   QrCode, 
   X 
 } from 'lucide-react';
@@ -25,6 +21,7 @@ import {
   LocalIdentity 
 } from '../types';
 import { getCanonicalAppUrl } from '../services/config';
+import { transport } from '../services/transport';
 
 interface FieldDeskProps {
   identity: LocalIdentity;
@@ -51,15 +48,23 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
 }) => {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [selectedUrlOverride, setSelectedUrlOverride] = useState('');
+  const [showHotspotPrompt, setShowHotspotPrompt] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('wayline_hotspot_prompt_dismissed');
+    } catch {
+      return true;
+    }
+  });
 
   const activeIncidents = incidents.filter(i => i.status === 'ACTIVE');
   const connectedPeers = peers.filter(p => p.status === 'CONNECTED');
   const recentMessages = messages.slice(-4).reverse();
 
-  // 1. Permanent canonical application URL (identical on PC and Android)
-  const canonicalAppUrl = getCanonicalAppUrl();
+  // Dynamic application URL: adapts to actual host IP, Wi-Fi hotspot, or manual selection
+  const defaultAppUrl = getCanonicalAppUrl(transportState.listeningAddress);
+  const canonicalAppUrl = selectedUrlOverride || defaultAppUrl;
 
-  // 2. Dynamic local node IP for subnet device pairing (diagnostic only)
   const isListeningValid = Boolean(
     transportState.listeningAddress && 
     !transportState.listeningAddress.includes('Awaiting') && 
@@ -122,6 +127,42 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         </div>
       </div>
 
+      {/* Extend Mesh Range Hotspot Prompt for Connecting Peers */}
+      {showHotspotPrompt && (
+        <div className="bento-card" style={{ marginBottom: 18, background: 'var(--color-yellow-tint)', padding: '12px 16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '1.4rem' }}>📶</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>Extend Mesh Range</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-ink-muted)' }}>
+                  Turn on your phone's Portable Hotspot so other devices can chain through you.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <a 
+                href="intent:#Intent;action=android.settings.TETHER_SETTINGS;end" 
+                className="btn-tactile btn-sm"
+                style={{ background: 'var(--color-yellow)', textDecoration: 'none' }}
+              >
+                Open Hotspot Settings
+              </a>
+              <button 
+                type="button"
+                className="btn-tactile btn-sm"
+                onClick={() => {
+                  setShowHotspotPrompt(false);
+                  try { sessionStorage.setItem('wayline_hotspot_prompt_dismissed', '1'); } catch {}
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bento Grid */}
       <div className="bento-grid">
         
@@ -167,13 +208,13 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
               </div>
             </div>
 
-            <p style={{ fontSize: '0.85rem', color: 'var(--color-ink-muted)', lineHeight: 1.4 }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--color-ink-muted)' }}>
               {transportState.isCompanionConnected
-                ? `Zero-config discovery broadcasting on UDP port ${transportState.listeningAddress}. Devices on the same Wi-Fi / hotspot link automatically without internet.`
-                : 'Local daemon not detected. All messages, incident notes, and SOS beacons are securely stored in device IndexedDB.'}
+                ? `Mesh active on ${transportState.listeningAddress}`
+                : 'Offline standalone mode • Messages saved in IndexedDB'}
             </p>
 
-            {transportState.isCompanionConnected && (
+            {transportState.isCompanionConnected ? (
               <div style={{ 
                 marginTop: 10, 
                 padding: '10px 14px', 
@@ -184,14 +225,11 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
-                      CANONICAL APPLICATION URL:
+                    <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
+                      SHARE / JOIN LINK:
                     </div>
-                    <div style={{ fontSize: '1rem', fontWeight: 900, color: '#EA644B', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#EA644B', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-all' }}>
                       {canonicalAppUrl}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', marginTop: 2 }}>
-                      Identical link for PC and phone • Precache once for permanent offline use
                     </div>
                   </div>
 
@@ -204,6 +242,62 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                     <QrCode size={15} />
                     Scan QR
                   </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ 
+                marginTop: 10, 
+                padding: '10px 14px', 
+                background: '#FFF9E6', 
+                border: '2px solid var(--color-ink)', 
+                borderRadius: 'var(--radius-sm)',
+                boxShadow: '1px 1px 0px var(--color-ink)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--color-ink)' }}>
+                      STANDALONE MODE (No host connected)
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-ink-muted)', marginTop: 2 }}>
+                      {transportState.customHost ? `Target: ${transportState.customHost}` : 'Host not responding at browser origin.'}
+                      {transportState.lastError ? ` (${transportState.lastError})` : ''}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn-tactile btn-sm"
+                      onClick={() => transport.autoDiscoverHost()}
+                      disabled={transportState.isScanning}
+                      style={{ background: 'var(--color-yellow)' }}
+                      title="Probes common gateways and subnet for running node"
+                    >
+                      <RefreshCw size={13} className={transportState.isScanning ? 'spin' : ''} />
+                      {transportState.isScanning ? 'Probing...' : 'Auto-Detect Host'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-tactile btn-sm"
+                      onClick={() => {
+                        const input = prompt('Enter WAYLINE Host IP (e.g. 192.168.43.50):', transportState.customHost || '');
+                        if (input !== null) transport.setHostOverride(input);
+                      }}
+                    >
+                      Set Host IP
+                    </button>
+                    {transportState.customHost && (
+                      <button
+                        type="button"
+                        className="btn-tactile btn-sm"
+                        onClick={() => transport.setHostOverride(null)}
+                        style={{ background: '#FFF' }}
+                        title="Reset to browser default origin"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -391,64 +485,20 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
           </button>
         </div>
 
-        {/* Small Tile 1: Offline Readiness (Span 4) */}
-        <div className="bento-card col-span-4 blue-tint">
-          <div className="card-header">
-            <span className="card-title">OFFLINE PWA STATUS</span>
-            <CheckCircle2 size={16} color="#73966A" />
-          </div>
-          <div style={{ fontSize: '1.2rem', fontWeight: 900, marginBottom: 4 }}>
-            {isOfflineReady ? 'OFFLINE READY' : 'PREPARING CACHE'}
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)' }}>
-            {isOfflineReady 
-              ? 'All core UI bundles and assets are precached. Reopenable with zero internet.'
-              : 'Caching application shell via Service Worker.'}
-          </p>
-        </div>
-
-        {/* Small Tile 2: Local Storage (Span 4) */}
-        <div className="bento-card col-span-4 yellow-tint">
-          <div className="card-header">
-            <span className="card-title">PERSISTENT STORAGE</span>
-            <HardDrive size={16} color="#292D29" />
-          </div>
-          <div style={{ fontSize: '1.2rem', fontWeight: 900, marginBottom: 4 }}>
-            IndexedDB Active
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)' }}>
-            {messages.length} messages, {incidents.length} incidents saved locally across restarts.
-          </p>
-        </div>
-
-        {/* Small Tile 3: Transport Mode (Span 4) */}
-        <div className="bento-card col-span-4">
-          <div className="card-header">
-            <span className="card-title">RADIO / PROTOCOL</span>
-            <Compass size={16} color="#292D29" />
-          </div>
-          <div style={{ fontSize: '1.2rem', fontWeight: 900, marginBottom: 4 }}>
-            UDP LAN Beacon
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)' }}>
-            Zero-config subnet discovery. Multi-hop relay enabled (TTL: 3 hops).
-          </p>
-        </div>
-
       </div>
 
       {/* QR Code Phone Scanner Modal */}
       {showQrModal && (
         <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 360 }}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 380 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan Canonical Application URL</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan Dynamic Mesh Link</h3>
               <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginBottom: 14 }}>
-              Open this identical URL on your Android phone to cache WAYLINE for offline use.
+              Scan with your phone's camera on the shared Wi-Fi / hotspot to join and cache WAYLINE.
             </p>
             {qrDataUrl && (
               <div style={{ 
@@ -459,15 +509,39 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 display: 'inline-block',
                 boxShadow: 'var(--shadow-tactile)'
               }}>
-                <img src={qrDataUrl} alt="Canonical Application QR Code" style={{ width: 220, height: 220, display: 'block' }} />
+                <img src={qrDataUrl} alt="Application QR Code" style={{ width: 220, height: 220, display: 'block' }} />
               </div>
             )}
-            <div style={{ marginTop: 14, fontSize: '0.95rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B' }}>
+            <div style={{ marginTop: 14, fontSize: '0.95rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B', wordBreak: 'break-all' }}>
               {canonicalAppUrl}
             </div>
-            {localNodeUrl && (
-              <div style={{ marginTop: 8, fontSize: '0.72rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
-                Companion Node: {localNodeUrl} (auto-pairs on local Wi-Fi)
+
+            {transportState.availableInterfaces && transportState.availableInterfaces.length > 1 && (
+              <div style={{ marginTop: 12, textAlign: 'left' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-ink-muted)', marginBottom: 4 }}>
+                  DETECTED ADAPTERS (click to switch):
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {transportState.availableInterfaces.map(iface => (
+                    <button
+                      key={iface.ip}
+                      type="button"
+                      onClick={() => setSelectedUrlOverride(iface.url)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        fontFamily: 'var(--font-mono)',
+                        border: '1.5px solid var(--color-ink)',
+                        borderRadius: 4,
+                        background: canonicalAppUrl === iface.url ? 'var(--color-yellow)' : '#FFF',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <strong>{iface.name}:</strong> {iface.url}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>

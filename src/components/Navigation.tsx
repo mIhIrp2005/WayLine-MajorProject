@@ -143,21 +143,25 @@ export const Navigation: React.FC<NavigationProps> = ({
         <div style={{ 
           background: 'var(--color-paper)', 
           border: '1.5px solid var(--color-ink)', 
-          padding: '12px', 
-          borderRadius: 'var(--radius-md)',
-          boxShadow: '1px 1px 0px var(--color-ink)'
+          padding: '8px 12px', 
+          borderRadius: 'var(--radius-sm)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.72rem',
+          fontFamily: 'var(--font-mono)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 700 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700 }}>
             {transportState.isCompanionConnected ? (
-              <Wifi size={14} color="#73966A" />
+              <Wifi size={13} color="#73966A" />
             ) : (
-              <WifiOff size={14} color="#5E635C" />
+              <WifiOff size={13} color="#5E635C" />
             )}
-            <span>{transportState.isCompanionConnected ? 'LAN TRANSPORT ACTIVE' : 'LOCAL STORE ONLY'}</span>
-          </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--color-ink-muted)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-            Peers: {transportState.peerCount} connected
-          </div>
+            {transportState.isCompanionConnected ? 'Mesh Active' : 'Standalone'}
+          </span>
+          <span style={{ color: 'var(--color-ink-muted)' }}>
+            {transportState.peerCount} peer{transportState.peerCount === 1 ? '' : 's'}
+          </span>
         </div>
       </aside>
 
@@ -174,9 +178,22 @@ export const Navigation: React.FC<NavigationProps> = ({
         <button 
           className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
           onClick={() => setActiveTab('messages')}
+          style={{ position: 'relative' }}
         >
           <MessageSquare size={18} />
           <span>Chat</span>
+          {unreadMessagesCount > 0 && (
+            <span style={{
+              position: 'absolute',
+              top: 4,
+              right: '20%',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: '#F2D77A',
+              border: '1px solid var(--color-ink)'
+            }} />
+          )}
         </button>
 
         <button 
@@ -199,9 +216,22 @@ export const Navigation: React.FC<NavigationProps> = ({
         <button 
           className={`mobile-nav-item ${activeTab === 'incidents' ? 'active' : ''}`}
           onClick={() => setActiveTab('incidents')}
+          style={{ position: 'relative' }}
         >
           <AlertTriangle size={18} />
           <span>Alerts</span>
+          {activeIncidentsCount > 0 && (
+            <span style={{
+              position: 'absolute',
+              top: 4,
+              right: '20%',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: '#EA644B',
+              border: '1px solid var(--color-ink)'
+            }} />
+          )}
         </button>
 
         <button 

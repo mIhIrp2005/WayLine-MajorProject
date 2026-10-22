@@ -79,11 +79,11 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
       {/* Filter Toolbar */}
       <div style={{ 
         display: 'flex', 
-        gap: 12, 
+        gap: 8, 
         flexWrap: 'wrap', 
         alignItems: 'center', 
-        marginBottom: 20, 
-        padding: '12px 16px', 
+        marginBottom: 16, 
+        padding: '10px 12px', 
         background: 'var(--color-paper-card)', 
         border: '2px solid var(--color-ink)', 
         borderRadius: 'var(--radius-md)',
@@ -98,6 +98,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
           style={{
+            flex: '1 1 120px',
             padding: '6px 10px',
             border: '1.5px solid var(--color-ink)',
             borderRadius: 'var(--radius-sm)',
@@ -118,6 +119,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           style={{
+            flex: '1 1 120px',
             padding: '6px 10px',
             border: '1.5px solid var(--color-ink)',
             borderRadius: 'var(--radius-sm)',
@@ -131,8 +133,8 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
           <option value="RESOLVED">Resolved</option>
         </select>
 
-        <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
-          Showing {filteredIncidents.length} of {incidents.length} Records
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
+          ({filteredIncidents.length}/{incidents.length})
         </span>
       </div>
 

@@ -6,14 +6,12 @@ import {
   Trash2, 
   User, 
   Radio, 
-  ShieldCheck, 
-  AlertTriangle,
-  Info,
   Volume2
 } from 'lucide-react';
 import { LocalIdentity, TransportState } from '../types';
 import { storage } from '../services/storage';
 import { getCanonicalAppUrl } from '../services/config';
+import { transport } from '../services/transport';
 
 interface SettingsViewProps {
   identity: LocalIdentity;
@@ -35,6 +33,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [nodeName, setNodeName] = useState(identity.nodeName);
   const [isSavingName, setIsSavingName] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [hostInput, setHostInput] = useState(transportState.customHost || '');
 
   const handleSaveName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,12 +64,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Header */}
       <div className="page-header">
         <div className="page-title-group">
-          <h1>Node Diagnostics & Settings</h1>
-          <p>Local identity, offline cache status, and disaster network limitations</p>
+          <h1>Settings & Diagnostics</h1>
+          <p>Device callsign, connection endpoints, and offline cache</p>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16 }}>
         
         {/* Node Identity Card */}
         <div className="bento-card">
@@ -123,6 +122,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </form>
         </div>
 
+        {/* Dynamic Host Connection Card */}
+        <div className="bento-card">
+          <div className="card-header">
+            <span className="card-title">
+              <Radio size={16} />
+              DYNAMIC HOST NODE
+            </span>
+            <span className={`pill ${transportState.isCompanionConnected ? 'pill-green' : 'pill-yellow'}`}>
+              {transportState.isCompanionConnected ? 'HOST CONNECTED' : 'STANDALONE'}
+            </span>
+          </div>
+
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-ink-muted)', marginBottom: 12 }}>
+            Switch host IP dynamically if host device changes or when host is not the hotspot gateway.
+          </p>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
+              HOST IP / DOMAIN:
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 192.168.43.50 or wayline.local"
+              value={hostInput}
+              onChange={(e) => setHostInput(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1.5px solid var(--color-ink)',
+                background: 'var(--color-paper)',
+                fontSize: '0.9rem',
+                fontFamily: 'var(--font-mono)'
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn-tactile btn-sm"
+              onClick={() => transport.setHostOverride(hostInput.trim())}
+              disabled={!hostInput.trim()}
+            >
+              Connect to Host
+            </button>
+            <button
+              type="button"
+              className="btn-tactile btn-sm"
+              onClick={async () => {
+                const found = await transport.autoDiscoverHost();
+                if (found) setHostInput(found);
+              }}
+              disabled={transportState.isScanning}
+              style={{ background: 'var(--color-yellow)' }}
+            >
+              {transportState.isScanning ? 'Probing...' : 'Auto-Detect on Subnet'}
+            </button>
+            {transportState.customHost && (
+              <button
+                type="button"
+                className="btn-tactile btn-sm"
+                onClick={() => {
+                  transport.setHostOverride(null);
+                  setHostInput('');
+                }}
+                style={{ background: '#FFF' }}
+              >
+                Reset Default
+              </button>
+            )}
+          </div>
+
+          <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-ink-muted)' }}>
+            Active: <code>{transportState.listeningAddress}</code>
+            {transportState.lastError && <div style={{ color: '#D9534F', marginTop: 4 }}>{transportState.lastError}</div>}
+          </div>
+        </div>
+
         {/* PWA & Cache Status */}
         <div className="bento-card blue-tint">
           <div className="card-header">
@@ -157,65 +235,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div>Local Node Adapter: {transportState.isCompanionConnected ? transportState.listeningAddress : 'Offline / Standalone'}</div>
             <div>Storage Engine: HTML5 IndexedDB (wayline_offline_db)</div>
             <div>Cache Name: wayline-cache-v1</div>
-          </div>
-        </div>
-
-        {/* Transparent System Limitations Card */}
-        <div className="bento-card col-span-12 yellow-tint">
-          <div className="card-header">
-            <span className="card-title">
-              <AlertTriangle size={16} color="#292D29" />
-              DISASTER RESILIENCE TRANSPARENCY & LIMITATIONS
-            </span>
-            <span className="pill pill-muted">ENGINEERING AUDIT</span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, fontSize: '0.85rem', lineHeight: 1.5 }}>
-            <div>
-              <strong style={{ display: 'block', marginBottom: 4 }}>No Central Gateway Guarantee</strong>
-              WAYLINE operates over direct local Wi-Fi / hotspot subnet broadcasts (UDP:8766 + WS:8765). Messages reach only devices within local radio/LAN range unless an internet gateway is present.
-            </div>
-
-            <div>
-              <strong style={{ display: 'block', marginBottom: 4 }}>Emergency Services Notice</strong>
-              Broadcasting SOS notifies nearby WAYLINE peers only. It does <em>not</em> place automated calls to 911 or dispatch official emergency teams without an authorized local responder.
-            </div>
-
-            <div>
-              <strong style={{ display: 'block', marginBottom: 4 }}>Multi-Hop Relay Rules</strong>
-              Packets have a TTL of 3 hops. Duplicate detection prevents network loops. Malformed or oversized payloads are rejected at the protocol layer.
-            </div>
-          </div>
-        </div>
-
-        {/* Radio & Browser Capability Diagnostics (Web Bluetooth & PWA) */}
-        <div className="bento-card col-span-12">
-          <div className="card-header">
-            <span className="card-title">
-              <Radio size={16} />
-              BROWSER RADIO CAPABILITIES & HARDWARE PROBE
-            </span>
-            <span className={`pill ${typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'pill-blue' : 'pill-yellow'}`}>
-              {typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'CLIENT API PRESENT' : 'UNAVAILABLE'}
-            </span>
-          </div>
-
-          <div style={{ fontSize: '0.82rem', lineHeight: 1.5, color: 'var(--color-ink)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
-              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-                <strong>Web Bluetooth API:</strong> {typeof navigator !== 'undefined' && 'bluetooth' in navigator ? 'Available (Client Central Role only)' : 'Not supported by this browser'}
-              </div>
-              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-                <strong>Phone-to-Phone BLE Mesh:</strong> <span style={{ color: '#EA644B', fontWeight: 700 }}>Unsupported in Web Standards</span>
-              </div>
-              <div style={{ padding: '8px 12px', background: 'var(--color-paper)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-                <strong>Zero-Install P2P Transports:</strong> Wi-Fi WebSockets & Acoustic 2-FSK Modem
-              </div>
-            </div>
-
-            <p style={{ color: 'var(--color-ink-muted)', fontSize: '0.78rem' }}>
-              <strong>Truthful Hardware Notice:</strong> The W3C Web Bluetooth specification only permits browser web pages to connect outward as a <em>Central / Client</em> to pre-existing Bluetooth hardware (e.g., an ESP32 micro-controller or LoRa bridge). Browsers cannot act as BLE Peripheral Advertisers or host GATT Servers to form an automatic zero-install phone mesh. Phone-to-phone communication in WAYLINE is achieved over shared Wi-Fi hotspots and ultrasonic/audio pulses.
-            </p>
           </div>
         </div>
 

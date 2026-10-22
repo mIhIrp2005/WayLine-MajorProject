@@ -159,15 +159,19 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  flex: 1;
+  min-height: 44px;
+  gap: 3px;
   background: none;
   border: none;
   color: var(--color-ink-muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  padding: 6px 10px;
+  padding: 4px 6px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .mobile-nav-item.active {
@@ -180,7 +184,7 @@ body {
 /* Main Content Area */
 .main-viewport {
   flex: 1;
-  padding: 20px 16px 80px;
+  padding: 16px 12px calc(76px + env(safe-area-inset-bottom, 16px));
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
@@ -404,4 +408,55 @@ body {
 .msg-bubble.sos {
   background: var(--color-coral-tint);
   border-color: var(--color-coral);
+}
+
+/* Mobile Responsive Adjustments */
+@media (max-width: 600px) {
+  .page-title-group h1 {
+    font-size: 1.35rem;
+  }
+
+  .page-title-group p {
+    font-size: 0.78rem;
+  }
+
+  .page-header {
+    margin-bottom: 14px;
+    gap: 8px;
+  }
+
+  .bento-card {
+    padding: 14px 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .modal-overlay {
+    padding: 8px;
+  }
+
+  .modal-dialog {
+    padding: 16px 12px;
+    max-height: 88vh;
+    border-radius: var(--radius-md);
+  }
+
+  .msg-bubble {
+    padding: 10px 12px;
+  }
+
+  .msg-bubble.outgoing {
+    margin-left: 12px;
+  }
+
+  .msg-bubble.incoming {
+    margin-right: 12px;
+  }
+
+  /* Prevent automatic iOS Safari zoom on focus */
+  input[type="text"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
