@@ -41,6 +41,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsSavingName(true);
     try {
       const updated = await storage.updateIdentityName(nodeName.trim());
+      transport.updateIdentity(updated);
       onIdentityUpdated(updated);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);

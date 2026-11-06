@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { 
   Users, 
   RefreshCw, 
-  Clock 
+  Clock,
+  Phone
 } from 'lucide-react';
 import { DiscoveredPeer, TransportState, LocalIdentity, StoredMessage } from '../types';
 import { transport } from '../services/transport';
+import { voiceManager } from '../services/voice/voiceManager';
 import { TopologyDiagram } from './TopologyDiagram';
 
 interface NearbyViewProps {
@@ -125,19 +127,47 @@ export const NearbyView: React.FC<NearbyViewProps> = ({
                       <Clock size={12} />
                       Heard {secondsAgo}s ago
                     </span>
-                    {peer.transport !== 'DIRECT' ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
                         className="btn-tactile btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.7rem' }}
-                        onClick={() => transport.connectToPeer(peer.id, peer.name)}
+                        style={{
+                          minHeight: 32,
+                          padding: '4px 10px',
+                          fontSize: '0.75rem',
+                          background: 'var(--color-green)',
+                          color: '#fff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5
+                        }}
+                        onClick={async () => {
+                          try {
+                            await voiceManager.startCall(peer.id, peer.name);
+                          } catch (err: any) {
+                            console.warn('[NearbyView] Call failed:', err.message);
+                          }
+                        }}
+                        title={`Call ${peer.name}`}
+                        aria-label={`Voice call ${peer.name}`}
                       >
-                        Pair Direct Link
+                        <Phone size={12} />
+                        Call
                       </button>
-                    ) : (
-                      <span style={{ fontWeight: 700, color: '#73966A' }}>
-                        Direct P2P Link Active
-                      </span>
-                    )}
+                      {peer.transport !== 'DIRECT' ? (
+                        <button
+                          className="btn-tactile btn-sm"
+                          style={{ minHeight: 32, padding: '4px 10px', fontSize: '0.75rem' }}
+                          onClick={() => transport.connectToPeer(peer.id, peer.name)}
+                          aria-label={`Pair direct link with ${peer.name}`}
+                        >
+                          Pair Direct Link
+                        </button>
+                      ) : (
+                        <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>
+                          Direct P2P
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Radio, 
   Zap, 
@@ -51,27 +51,26 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
   );
 
   // Auto-order peers: prioritize manual order, then hop count, then discovery
-  const getPeerHop = (peerId: string) => {
-    const peerMsgs = messages.filter(m => m.senderId === peerId);
-    if (peerMsgs.length === 0) return 999;
-    return peerMsgs[peerMsgs.length - 1].hopCount;
-  };
+  const sortedPeers = useMemo(() => {
+    const hopMap = new Map<string, number>();
+    for (const m of messages) {
+      hopMap.set(m.senderId, m.hopCount);
+    }
 
-  const sortedPeers = [...peers].sort((a, b) => {
-    const orderA = chainOrder.indexOf(a.id);
-    const orderB = chainOrder.indexOf(b.id);
-    if (orderA !== -1 && orderB !== -1) return orderA - orderB;
-    if (orderA !== -1) return -1;
-    if (orderB !== -1) return 1;
+    return [...peers].sort((a, b) => {
+      const orderA = chainOrder.indexOf(a.id);
+      const orderB = chainOrder.indexOf(b.id);
+      if (orderA !== -1 && orderB !== -1) return orderA - orderB;
+      if (orderA !== -1) return -1;
+      if (orderB !== -1) return 1;
 
-    // Next sort by hop count from packets
-    const hopA = getPeerHop(a.id);
-    const hopB = getPeerHop(b.id);
-    if (hopA !== hopB) return hopA - hopB;
+      const hopA = hopMap.get(a.id) ?? 999;
+      const hopB = hopMap.get(b.id) ?? 999;
+      if (hopA !== hopB) return hopA - hopB;
 
-    // Fallback sort by name
-    return a.name.localeCompare(b.name);
-  });
+      return a.name.localeCompare(b.name);
+    });
+  }, [peers, messages, chainOrder]);
 
   // Reorder functions for Chain mode
   const movePeerInChain = (peerId: string, direction: 'left' | 'right') => {
@@ -130,19 +129,35 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
       isLocal: false,
       address: transportState.listeningAddress
     });
+
+    // Add local phone device to chain if viewing on a field phone
+    chainNodes.push({
+      id: identity.nodeId,
+      name: identity.nodeName,
+      role: 'Field Device (You)',
+      hopLabel: 'Hop 1',
+      isAnchor: false,
+      isLocal: true,
+      transport: 'WEBSOCKET',
+      status: 'CONNECTED',
+      address: 'Local'
+    });
   }
 
   // Add the peers in the chain order
   sortedPeers.forEach((p, idx) => {
-    const hopNumber = idx + 1;
-    const isTerminal = idx === sortedPeers.length - 1 && sortedPeers.length > 1;
+    // Avoid duplicating self if local node ID is in peer list
+    if (p.id === identity.nodeId) return;
+
+    const hopNumber = isLocalTheAnchor ? (idx + 1) : (idx + 2);
+    const isTerminal = idx === sortedPeers.length - 1 && sortedPeers.length > 0;
     chainNodes.push({
       id: p.id,
       name: p.name,
       role: isTerminal ? 'Edge Node' : `Hotspot ${String.fromCharCode(65 + idx)} Relay`,
       hopLabel: `Hop ${hopNumber}`,
       isAnchor: false,
-      isLocal: p.id === identity.nodeId,
+      isLocal: false,
       transport: p.transport,
       status: p.status,
       address: p.address,
@@ -205,7 +220,7 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
               fontWeight: 800,
               background: mode === 'CHAIN' ? '#EA644B' : 'transparent',
               color: mode === 'CHAIN' ? '#FFF' : 'var(--color-ink)',
-              border: mode === 'CHAIN' ? '1px solid #292D29' : 'none',
+              border: mode === 'CHAIN' ? '1px solid var(--color-card-border)' : 'none',
               boxShadow: mode === 'CHAIN' ? 'var(--shadow-tactile)' : 'none'
             }}
             onClick={() => setMode('CHAIN')}
@@ -221,7 +236,7 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
               fontWeight: 800,
               background: mode === 'STAR' ? '#EA644B' : 'transparent',
               color: mode === 'STAR' ? '#FFF' : 'var(--color-ink)',
-              border: mode === 'STAR' ? '1px solid #292D29' : 'none',
+              border: mode === 'STAR' ? '1px solid var(--color-card-border)' : 'none',
               boxShadow: mode === 'STAR' ? 'var(--shadow-tactile)' : 'none'
             }}
             onClick={() => setMode('STAR')}
@@ -234,7 +249,7 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
       {/* SVG Canvas Container */}
       <div style={{ 
         background: 'var(--color-paper)', 
-        border: '2px solid var(--color-ink)', 
+        border: '2px solid var(--color-card-border)', 
         borderRadius: 'var(--radius-md)', 
         overflowX: 'auto',
         overflowY: 'hidden',
@@ -250,7 +265,7 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
           >
             <defs>
               <pattern id="chainGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" fill="#D6CEBD" opacity="0.6" />
+                <circle cx="1" cy="1" r="1" fill="var(--color-border)" opacity="0.5" />
               </pattern>
             </defs>
             <rect width={chainSvgWidth} height={chainSvgHeight} fill="url(#chainGrid)" />
@@ -276,22 +291,22 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
                     y1={y} 
                     x2={x2} 
                     y2={y} 
-                    stroke="#292D29" 
+                    stroke="var(--color-ink)" 
                     strokeWidth="2.5" 
                   />
                   {/* Direction arrows */}
                   <polygon 
                     points={`${x2 - 4},${y} ${x2 - 12},${y - 4} ${x2 - 12},${y + 4}`} 
-                    fill="#292D29" 
+                    fill="var(--color-ink)" 
                   />
                   <polygon 
                     points={`${x1 + 4},${y} ${x1 + 12},${y - 4} ${x1 + 12},${y + 4}`} 
-                    fill="#292D29" 
+                    fill="var(--color-ink)" 
                   />
                   {/* Tactile badge */}
                   <g transform={`translate(${midX}, ${y})`}>
-                    <rect x="-48" y="-10" width="96" height="20" rx="4" fill="#FAF7F0" stroke="#292D29" strokeWidth="1.5" />
-                    <text x="0" y="3" textAnchor="middle" fontSize="8.5" fontWeight="800" fontFamily="var(--font-mono)" fill="#292D29">
+                    <rect x="-48" y="-10" width="96" height="20" rx="4" fill="var(--color-paper-card)" stroke="var(--color-card-border)" strokeWidth="1.5" />
+                    <text x="0" y="3" textAnchor="middle" fontSize="8.5" fontWeight="800" fontFamily="var(--font-mono)" fill="var(--color-ink)">
                       {linkLabel}
                     </text>
                   </g>
@@ -316,8 +331,8 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
                     fill="none" 
                   />
                   <g transform={`translate(${(startX + targetX) / 2}, 30)`}>
-                    <rect x="-54" y="-9" width="108" height="18" rx="4" fill="#EBF2E9" stroke="#73966A" strokeWidth="1.5" />
-                    <text x="0" y="3" textAnchor="middle" fontSize="8.5" fontWeight="800" fill="#292D29">
+                    <rect x="-54" y="-9" width="108" height="18" rx="4" fill="var(--color-green-tint)" stroke="var(--color-green)" strokeWidth="1.5" />
+                    <text x="0" y="3" textAnchor="middle" fontSize="8.5" fontWeight="800" fill="var(--color-ink)">
                       ⚡ Direct WebRTC P2P
                     </text>
                   </g>
@@ -335,11 +350,11 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
               if (node.isAnchor) iconEmoji = '💻';
               if (node.transport === 'DIRECT') iconEmoji = '⚡';
 
-              let badgeBg = '#FAF7F0';
-              if (node.isLocal) badgeBg = '#EA644B';
-              else if (node.isAnchor) badgeBg = '#F2D77A';
-              else if (node.transport === 'DIRECT') badgeBg = '#73966A';
-              else badgeBg = '#A9CDE0';
+              let badgeBg = 'var(--color-paper-card)';
+              if (node.isLocal) badgeBg = 'var(--color-coral)';
+              else if (node.isAnchor) badgeBg = 'var(--color-yellow)';
+              else if (node.transport === 'DIRECT') badgeBg = 'var(--color-green)';
+              else badgeBg = 'var(--color-blue)';
 
               return (
                 <g 
@@ -349,7 +364,7 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
                   onClick={() => setSelectedNodeId(node.id)}
                 >
                   {/* Tactile Shadow */}
-                  <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="#292D29" />
+                  <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="rgba(0, 0, 0, 0.4)" />
                   {/* Card Body */}
                   <rect 
                     x="0" 
@@ -357,27 +372,27 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
                     width={nodeWidth} 
                     height={nodeHeight} 
                     rx="8" 
-                    fill={isSelected ? '#FBECE8' : (node.isLocal ? '#FAF7F0' : '#FAF7F0')} 
-                    stroke={isSelected ? '#EA644B' : '#292D29'} 
-                    strokeWidth={isSelected ? '2.5' : '2'} 
+                    fill={isSelected ? 'var(--color-coral-tint)' : 'var(--color-paper-card)'} 
+                    stroke={isSelected ? 'var(--color-coral)' : 'var(--color-card-border)'} 
+                    strokeWidth={isSelected ? '2.5' : '1.5'} 
                   />
                   {/* Icon Circle */}
-                  <rect x="9" y="11" width="32" height="32" rx="6" fill={badgeBg} stroke="#292D29" strokeWidth="1.5" />
-                  <text x="25" y="31" textAnchor="middle" fontSize={node.isLocal ? '11' : '14'} fontWeight="900" fill={node.isLocal ? '#FFF' : '#292D29'}>
+                  <rect x="9" y="11" width="32" height="32" rx="6" fill={badgeBg} stroke="var(--color-card-border)" strokeWidth="1.5" />
+                  <text x="25" y="31" textAnchor="middle" fontSize={node.isLocal ? '11' : '14'} fontWeight="900" fill={node.isLocal ? '#FFF' : 'var(--color-ink)'}>
                     {node.isLocal ? 'YOU' : iconEmoji}
                   </text>
                   {/* Node Name */}
-                  <text x="48" y="24" fontSize="11" fontWeight="800" fill="#292D29" fontFamily="var(--font-sans)">
+                  <text x="48" y="24" fontSize="11" fontWeight="800" fill="var(--color-ink)" fontFamily="var(--font-sans)">
                     {node.name.length > 13 ? node.name.slice(0, 12) + '…' : node.name}
                   </text>
                   {/* Role & Hop */}
-                  <text x="48" y="39" fontSize="8.5" fontWeight="700" fill="#5E635C" fontFamily="var(--font-mono)">
+                  <text x="48" y="39" fontSize="8.5" fontWeight="700" fill="var(--color-ink-muted)" fontFamily="var(--font-mono)">
                     {node.role}
                   </text>
                   {/* Hop Tag underneath */}
                   <g transform={`translate(${nodeWidth / 2}, ${nodeHeight + 16})`}>
-                    <rect x="-42" y="-8" width="84" height="16" rx="4" fill="#EDE7D8" stroke="#292D29" strokeWidth="1" />
-                    <text x="0" y="3" textAnchor="middle" fontSize="8" fontWeight="800" fontFamily="var(--font-mono)" fill="#292D29">
+                    <rect x="-42" y="-8" width="84" height="16" rx="4" fill="var(--color-paper-dark)" stroke="var(--color-card-border)" strokeWidth="1" />
+                    <text x="0" y="3" textAnchor="middle" fontSize="8" fontWeight="800" fontFamily="var(--font-mono)" fill="var(--color-ink)">
                       {node.hopLabel}
                     </text>
                   </g>
@@ -407,50 +422,68 @@ export const TopologyDiagram: React.FC<TopologyDiagramProps> = ({
             <rect width={starWidth} height={starHeight} fill="url(#chainGrid)" />
             {/* Center Anchor */}
             <g transform={`translate(${starWidth / 2 - nodeWidth / 2}, ${starCenterY - nodeHeight / 2})`}>
-              <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="#292D29" />
-              <rect x="0" y="0" width={nodeWidth} height={nodeHeight} rx="8" fill="#FCF9ED" stroke="#292D29" strokeWidth="2" />
-              <rect x="10" y="11" width="32" height="32" rx="6" fill="#F2D77A" stroke="#292D29" strokeWidth="1.5" />
+              <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="rgba(0, 0, 0, 0.4)" />
+              <rect x="0" y="0" width={nodeWidth} height={nodeHeight} rx="8" fill="var(--color-paper-card)" stroke="var(--color-card-border)" strokeWidth="1.5" />
+              <rect x="10" y="11" width="32" height="32" rx="6" fill="var(--color-yellow)" stroke="var(--color-card-border)" strokeWidth="1.5" />
               <text x="26" y="31" textAnchor="middle" fontSize="14">⚓</text>
-              <text x="50" y="24" fontSize="11" fontWeight="800" fill="#292D29">Main Machine Host</text>
-              <text x="50" y="39" fontSize="8.5" fontWeight="600" fill="#5E635C" fontFamily="var(--font-mono)">
+              <text x="50" y="24" fontSize="11" fontWeight="800" fill="var(--color-ink)">Main Machine Host</text>
+              <text x="50" y="39" fontSize="8.5" fontWeight="600" fill="var(--color-ink-muted)" fontFamily="var(--font-mono)">
                 {transportState.listeningAddress}
               </text>
             </g>
 
             {/* Orbiting Peers */}
-            {peers.map((peer, idx) => {
-              const total = peers.length;
-              const angle = (idx / total) * 2 * Math.PI - Math.PI / 2;
-              const radius = 200;
-              const px = starWidth / 2 + Math.cos(angle) * radius - nodeWidth / 2;
-              const py = starCenterY + Math.sin(angle) * (starHeight * 0.35) - nodeHeight / 2;
+            {(() => {
+              const allStarNodes = isLocalTheAnchor 
+                ? peers 
+                : [
+                    { 
+                      id: identity.nodeId, 
+                      name: identity.nodeName, 
+                      transport: 'WEBSOCKET', 
+                      status: 'CONNECTED', 
+                      isLocal: true 
+                    } as any, 
+                    ...peers.filter(p => p.id !== identity.nodeId)
+                  ];
+              const total = allStarNodes.length || 1;
 
-              return (
-                <g key={`star-peer-${peer.id}`}>
-                  <line 
-                    x1={starWidth / 2} 
-                    y1={starCenterY} 
-                    x2={px + nodeWidth / 2} 
-                    y2={py + nodeHeight / 2} 
-                    stroke="#5E635C" 
-                    strokeWidth="1.8" 
-                    strokeDasharray="4 4" 
-                  />
-                  <g transform={`translate(${px}, ${py})`} onClick={() => setSelectedNodeId(peer.id)} style={{ cursor: 'pointer' }}>
-                    <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="#292D29" />
-                    <rect x="0" y="0" width={nodeWidth} height={nodeHeight} rx="8" fill="#FAF7F0" stroke="#292D29" strokeWidth="2" />
-                    <rect x="10" y="11" width="32" height="32" rx="6" fill="#A9CDE0" stroke="#292D29" strokeWidth="1.5" />
-                    <text x="26" y="31" textAnchor="middle" fontSize="14">📱</text>
-                    <text x="50" y="24" fontSize="11" fontWeight="800" fill="#292D29">
-                      {peer.name.length > 13 ? peer.name.slice(0, 12) + '…' : peer.name}
-                    </text>
-                    <text x="50" y="39" fontSize="8.5" fontWeight="600" fill="#5E635C" fontFamily="var(--font-mono)">
-                      {peer.transport}
-                    </text>
+              return allStarNodes.map((peer, idx) => {
+                const angle = (idx / total) * 2 * Math.PI - Math.PI / 2;
+                const radius = 200;
+                const px = starWidth / 2 + Math.cos(angle) * radius - nodeWidth / 2;
+                const py = starCenterY + Math.sin(angle) * (starHeight * 0.35) - nodeHeight / 2;
+                const isLocal = peer.isLocal || peer.id === identity.nodeId;
+
+                return (
+                  <g key={`star-peer-${peer.id}`}>
+                    <line 
+                      x1={starWidth / 2} 
+                      y1={starCenterY} 
+                      x2={px + nodeWidth / 2} 
+                      y2={py + nodeHeight / 2} 
+                      stroke="var(--color-border-dark)" 
+                      strokeWidth="1.8" 
+                      strokeDasharray="4 4" 
+                    />
+                    <g transform={`translate(${px}, ${py})`} onClick={() => setSelectedNodeId(peer.id)} style={{ cursor: 'pointer' }}>
+                      <rect x="2.5" y="2.5" width={nodeWidth} height={nodeHeight} rx="8" fill="rgba(0, 0, 0, 0.4)" />
+                      <rect x="0" y="0" width={nodeWidth} height={nodeHeight} rx="8" fill="var(--color-paper-card)" stroke="var(--color-card-border)" strokeWidth="1.5" />
+                      <rect x="10" y="11" width="32" height="32" rx="6" fill={isLocal ? 'var(--color-coral)' : 'var(--color-blue)'} stroke="var(--color-card-border)" strokeWidth="1.5" />
+                      <text x="26" y="31" textAnchor="middle" fontSize={isLocal ? '11' : '14'} fontWeight="900" fill={isLocal ? '#FFF' : 'var(--color-ink)'}>
+                        {isLocal ? 'YOU' : '📱'}
+                      </text>
+                      <text x="50" y="24" fontSize="11" fontWeight="800" fill="var(--color-ink)">
+                        {peer.name.length > 13 ? peer.name.slice(0, 12) + '…' : peer.name}
+                      </text>
+                      <text x="50" y="39" fontSize="8.5" fontWeight="600" fill="var(--color-ink-muted)" fontFamily="var(--font-mono)">
+                        {peer.transport}
+                      </text>
+                    </g>
                   </g>
-                </g>
-              );
-            })}
+                );
+              });
+            })()}
           </svg>
         )}
       </div>

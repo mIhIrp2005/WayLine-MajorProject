@@ -2,6 +2,8 @@ import { WaylinePacket, DiscoveredPeer, TransportState, LocalIdentity, StoredMes
 import { storage } from './storage';
 import { protocol } from './protocol';
 import { WebRTCTransportManager } from './transports/webrtcTransport';
+import { voiceSignaling } from './voice/voiceSignaling';
+import { voiceManager } from './voice/voiceManager';
 
 type Listener = () => void;
 
@@ -38,7 +40,28 @@ class WaylineTransportService {
   private async init() {
     this.identity = await storage.getOrCreateIdentity();
     this.webrtc.setIdentity(this.identity.nodeId, this.identity.nodeName);
+    voiceManager.setIdentity(this.identity.nodeId, this.identity.nodeName);
+    voiceSignaling.setSender((msg) => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify(msg));
+      }
+    });
     this.connectCompanion();
+  }
+
+  // Update local identity and re-register new callsign across mesh and daemon
+  public updateIdentity(identity: LocalIdentity) {
+    this.identity = identity;
+    this.webrtc.setIdentity(identity.nodeId, identity.nodeName);
+    voiceManager.setIdentity(identity.nodeId, identity.nodeName);
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({
+        type: 'CLIENT_REGISTER',
+        nodeId: identity.nodeId,
+        nodeName: identity.nodeName
+      }));
+    }
+    this.notify();
   }
 
   public subscribe(listener: Listener): () => void {
@@ -164,12 +187,15 @@ class WaylineTransportService {
     }
 
     const host = this.getTargetHost();
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const proto = isHttps ? 'wss:' : 'ws:';
+    const defaultPort = isHttps ? '8767' : '8765';
     const port = (typeof window !== 'undefined' && window.location.port && window.location.port !== '5173') 
       ? window.location.port 
-      : '8765';
+      : defaultPort;
     const nodeId = this.identity?.nodeId || '';
     const nodeName = this.identity?.nodeName || '';
-    const wsUrl = `ws://${host}:${port}/client?type=client&nodeId=${encodeURIComponent(nodeId)}&nodeName=${encodeURIComponent(nodeName)}`;
+    const wsUrl = `${proto}//${host}:${port}/client?type=client&nodeId=${encodeURIComponent(nodeId)}&nodeName=${encodeURIComponent(nodeName)}`;
 
     try {
       this.socket = new WebSocket(wsUrl);
@@ -179,7 +205,7 @@ class WaylineTransportService {
         this.state.activeTransport = 'UDP Local Wi-Fi Mesh Adapter';
         this.state.isScanning = true;
         this.state.lastError = null;
-        console.log(`[Transport] Connected to WAYLINE companion at ${host}:${port}`);
+        console.log(`[Transport] Connected to WAYLINE companion at ${host}:${port} (${proto})`);
         
         if (this.identity) {
           this.socket?.send(JSON.stringify({
@@ -188,6 +214,9 @@ class WaylineTransportService {
             nodeName: this.identity.nodeName
           }));
         }
+
+        // Refresh voice rooms list on companion connection
+        voiceManager.refreshRoomsList();
 
         // Automatically flush pending outbox messages over newly available transport
         this.flushOutboxQueue();
@@ -235,8 +264,15 @@ class WaylineTransportService {
 
   // Process inbound companion messages
   private async handleCompanionMessage(data: any) {
+    if (typeof data.type === 'string' && data.type.startsWith('VOICE_')) {
+      voiceSignaling.handleInboundMessage(data);
+      return;
+    }
+
     if (data.type === 'NODE_STATUS') {
       this.state.listeningAddress = data.listeningAddress;
+      this.state.hasHttps = data.hasHttps;
+      this.state.httpsListeningAddress = data.httpsListeningAddress;
       this.state.availableInterfaces = data.interfaces || [];
       this.peers = data.peers || [];
       this.state.peerCount = this.peers.filter(p => p.status === 'CONNECTED').length;

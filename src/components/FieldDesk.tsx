@@ -10,7 +10,9 @@ import {
   ArrowRight, 
   RefreshCw, 
   QrCode, 
-  X 
+  X,
+  Copy,
+  Check
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { 
@@ -49,6 +51,9 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [selectedUrlOverride, setSelectedUrlOverride] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [showHostInput, setShowHostInput] = useState(false);
+  const [hostInputValue, setHostInputValue] = useState(transportState.customHost || '');
   const [showHotspotPrompt, setShowHotspotPrompt] = useState<boolean>(() => {
     try {
       return !sessionStorage.getItem('wayline_hotspot_prompt_dismissed');
@@ -62,7 +67,11 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   const recentMessages = messages.slice(-4).reverse();
 
   // Dynamic application URL: adapts to actual host IP, Wi-Fi hotspot, or manual selection
-  const defaultAppUrl = getCanonicalAppUrl(transportState.listeningAddress);
+  const defaultAppUrl = getCanonicalAppUrl(
+    transportState.listeningAddress,
+    transportState.httpsListeningAddress,
+    transportState.hasHttps
+  );
   const canonicalAppUrl = selectedUrlOverride || defaultAppUrl;
 
   const isListeningValid = Boolean(
@@ -79,6 +88,16 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
       .then(url => setQrDataUrl(url))
       .catch(err => console.error(err));
   }, [canonicalAppUrl]);
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(canonicalAppUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.warn('Copy failed', err);
+    }
+  };
 
   return (
     <div>
@@ -112,10 +131,10 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
           <button 
             className="btn-tactile btn-sm"
             onClick={onRefreshDiscovery}
-            title="Scan local subnet"
+            title="Search for nearby devices"
           >
             <RefreshCw size={14} />
-            Scan Subnet
+            Search Nearby Devices
           </button>
           <button 
             className="btn-tactile btn-coral"
@@ -134,20 +153,31 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: '1.4rem' }}>📶</span>
               <div>
-                <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>Extend Mesh Range</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--color-ink-muted)' }}>
-                  Turn on your phone's Portable Hotspot so other devices can chain through you.
+                <div style={{ fontWeight: 900, fontSize: '0.92rem' }}>Extend Mesh via Portable Hotspot</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginTop: 2, maxWidth: 520, lineHeight: 1.4 }}>
+                  Turn on your mobile hotspot so nearby devices can join. When peers connect, have them scan your QR code or open <strong>{canonicalAppUrl}</strong> to join the mesh.
                 </div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <a 
-                href="intent:#Intent;action=android.settings.TETHER_SETTINGS;end" 
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button 
+                type="button"
                 className="btn-tactile btn-sm"
-                style={{ background: 'var(--color-yellow)', textDecoration: 'none' }}
+                onClick={() => setShowQrModal(true)}
+                style={{ background: 'var(--color-yellow)', display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                Open Hotspot Settings
-              </a>
+                <QrCode size={15} />
+                <span>Show Join QR Code</span>
+              </button>
+              {typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent) && (
+                <a 
+                  href="intent:#Intent;action=android.settings.TETHER_SETTINGS;end" 
+                  className="btn-tactile btn-sm"
+                  style={{ textDecoration: 'none' }}
+                >
+                  Hotspot Settings
+                </a>
+              )}
               <button 
                 type="button"
                 className="btn-tactile btn-sm"
@@ -167,34 +197,38 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
       <div className="bento-grid">
         
         {/* Large Tile 1: Local Network Status (Span 7) */}
-        <div className="bento-card col-span-7" style={{ minHeight: 240 }}>
+        <div className="bento-card bento-card-interactive col-span-7" style={{ minHeight: 240 }}>
           <div className="card-header">
             <span className="card-title">
-              <Radio size={16} color="#EA644B" />
-              LOCAL PEER TRANSPORT
+              <Radio size={16} color="var(--color-coral)" />
+              LOCAL MESH RADIO
             </span>
             <span className={`pill ${transportState.isCompanionConnected ? 'pill-green' : 'pill-yellow'}`}>
-              {transportState.isCompanionConnected ? 'DAEMON ONLINE' : 'STANDALONE STORAGE'}
+              <span className="live-beacon-dot" />
+              {transportState.isCompanionConnected ? 'MESH READY' : 'DEVICE ONLY (OFFLINE)'}
             </span>
           </div>
 
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
-              <div style={{ 
-                width: 52, 
-                height: 52, 
-                borderRadius: 'var(--radius-md)', 
-                background: transportState.peerCount > 0 ? 'var(--color-green-tint)' : 'var(--color-yellow-tint)',
-                border: '2px solid var(--color-ink)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                {transportState.peerCount > 0 ? (
-                  <Wifi size={28} color="#73966A" />
-                ) : (
-                  <WifiOff size={28} color="#292D29" />
-                )}
+              <div className="sonar-wrapper" style={{ borderRadius: 'var(--radius-md)' }}>
+                {transportState.isCompanionConnected && <span className="sonar-wave" />}
+                <div style={{ 
+                  width: 52, 
+                  height: 52, 
+                  borderRadius: 'var(--radius-md)', 
+                  background: transportState.peerCount > 0 ? 'var(--color-green-tint)' : 'var(--color-yellow-tint)',
+                  border: '2px solid var(--color-ink)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {transportState.peerCount > 0 ? (
+                    <Wifi size={28} color="#73966A" />
+                  ) : (
+                    <WifiOff size={28} color="#292D29" />
+                  )}
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 900 }}>
@@ -203,15 +237,15 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                     : 'No Nearby Peers in Range'}
                 </div>
                 <div style={{ fontSize: '0.82rem', color: 'var(--color-ink-muted)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
-                  Transport: {transportState.activeTransport}
+                  Radio Link: {transportState.activeTransport === 'UDP_LAN' ? 'Local Wi-Fi Mesh' : transportState.activeTransport}
                 </div>
               </div>
             </div>
 
             <p style={{ fontSize: '0.82rem', color: 'var(--color-ink-muted)' }}>
               {transportState.isCompanionConnected
-                ? `Mesh active on ${transportState.listeningAddress}`
-                : 'Offline standalone mode • Messages saved in IndexedDB'}
+                ? `Your Node Address: ${transportState.listeningAddress}`
+                : 'Offline standalone mode • Messages saved locally in IndexedDB'}
             </p>
 
             {transportState.isCompanionConnected ? (
@@ -228,20 +262,36 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                     <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>
                       SHARE / JOIN LINK:
                     </div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#EA644B', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-all' }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 900, color: 'var(--color-coral)', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-all' }}>
                       {canonicalAppUrl}
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn-tactile btn-sm"
-                    onClick={() => setShowQrModal(true)}
-                    style={{ background: 'var(--color-yellow)' }}
-                  >
-                    <QrCode size={15} />
-                    Scan QR
-                  </button>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn-tactile btn-sm"
+                      onClick={handleCopyLink}
+                      aria-label="Copy link to clipboard"
+                      style={{
+                        background: copiedLink ? 'var(--color-green)' : 'var(--color-paper-card)',
+                        color: copiedLink ? '#FFFFFF' : 'var(--color-ink)'
+                      }}
+                    >
+                      {copiedLink ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedLink ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-tactile btn-sm"
+                      onClick={() => setShowQrModal(true)}
+                      style={{ background: 'var(--color-yellow)' }}
+                      aria-label="Show QR code"
+                    >
+                      <QrCode size={15} />
+                      QR Code
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -276,21 +326,26 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                       <RefreshCw size={13} className={transportState.isScanning ? 'spin' : ''} />
                       {transportState.isScanning ? 'Probing...' : 'Auto-Detect Host'}
                     </button>
-                    <button
-                      type="button"
-                      className="btn-tactile btn-sm"
-                      onClick={() => {
-                        const input = prompt('Enter WAYLINE Host IP (e.g. 192.168.43.50):', transportState.customHost || '');
-                        if (input !== null) transport.setHostOverride(input);
-                      }}
-                    >
-                      Set Host IP
-                    </button>
+                    {!showHostInput ? (
+                      <button
+                        type="button"
+                        className="btn-tactile btn-sm"
+                        onClick={() => {
+                          setHostInputValue(transportState.customHost || '');
+                          setShowHostInput(true);
+                        }}
+                      >
+                        Set Host IP
+                      </button>
+                    ) : null}
                     {transportState.customHost && (
                       <button
                         type="button"
                         className="btn-tactile btn-sm"
-                        onClick={() => transport.setHostOverride(null)}
+                        onClick={() => {
+                          transport.setHostOverride(null);
+                          setShowHostInput(false);
+                        }}
                         style={{ background: '#FFF' }}
                         title="Reset to browser default origin"
                       >
@@ -299,6 +354,42 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                     )}
                   </div>
                 </div>
+
+                {showHostInput && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const trimmed = hostInputValue.trim();
+                      if (trimmed) transport.setHostOverride(trimmed);
+                      setShowHostInput(false);
+                    }}
+                    style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}
+                  >
+                    <input
+                      type="text"
+                      value={hostInputValue}
+                      onChange={(e) => setHostInputValue(e.target.value)}
+                      placeholder="e.g. 192.168.43.50"
+                      autoFocus
+                      aria-label="Host IP address"
+                      style={{
+                        flex: 1,
+                        padding: '6px 10px',
+                        fontSize: '0.82rem',
+                        fontFamily: 'var(--font-mono)',
+                        border: '2px solid var(--color-ink)',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--color-paper)'
+                      }}
+                    />
+                    <button type="submit" className="btn-tactile btn-sm" style={{ background: 'var(--color-green)', color: '#fff' }}>
+                      Connect
+                    </button>
+                    <button type="button" className="btn-tactile btn-sm" onClick={() => setShowHostInput(false)}>
+                      Cancel
+                    </button>
+                  </form>
+                )}
               </div>
             )}
           </div>
@@ -317,16 +408,22 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         </div>
 
         {/* Large Tile 2: SOS & Active Incident Hub (Span 5) */}
-        <div className={`bento-card col-span-5 ${activeIncidents.length > 0 ? 'coral-tint' : ''}`} style={{ minHeight: 240 }}>
+        <div className={`bento-card bento-card-interactive col-span-5 ${activeIncidents.length > 0 ? 'coral-tint' : ''}`} style={{ minHeight: 240 }}>
           <div className="card-header">
             <span className="card-title">
-              <ShieldAlert size={16} color="#EA644B" />
+              <ShieldAlert size={16} color="var(--color-coral)" />
               EMERGENCY BEACONS
             </span>
             {activeIncidents.length > 0 ? (
-              <span className="pill pill-coral">{activeIncidents.length} ACTIVE</span>
+              <span className="pill pill-coral">
+                <span className="live-beacon-dot" />
+                {activeIncidents.length} ACTIVE
+              </span>
             ) : (
-              <span className="pill pill-green">ALL CLEAR</span>
+              <span className="pill pill-green">
+                <CheckCircle2 size={13} />
+                ALL CLEAR
+              </span>
             )}
           </div>
 
@@ -335,7 +432,7 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {activeIncidents.slice(0, 2).map((inc) => (
                   <div key={inc.id} style={{ 
-                    background: '#FFFFFF', 
+                    background: 'var(--color-paper)', 
                     padding: '10px 12px', 
                     borderRadius: 'var(--radius-md)', 
                     border: '1.5px solid var(--color-ink)' 
@@ -378,7 +475,7 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         </div>
 
         {/* Medium Tile 1: Messages Preview (Span 6) */}
-        <div className="bento-card col-span-6" style={{ minHeight: 220 }}>
+        <div className="bento-card bento-card-interactive col-span-6" style={{ minHeight: 220 }}>
           <div className="card-header">
             <span className="card-title">
               <MessageSquare size={16} color="#A9CDE0" />
@@ -429,7 +526,7 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
         </div>
 
         {/* Medium Tile 2: Nearby Peers (Span 6) */}
-        <div className="bento-card col-span-6" style={{ minHeight: 220 }}>
+        <div className="bento-card bento-card-interactive col-span-6" style={{ minHeight: 220 }}>
           <div className="card-header">
             <span className="card-title">
               <Users size={16} color="#73966A" />
@@ -522,25 +619,29 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                   DETECTED ADAPTERS (click to switch):
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {transportState.availableInterfaces.map(iface => (
-                    <button
-                      key={iface.ip}
-                      type="button"
-                      onClick={() => setSelectedUrlOverride(iface.url)}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '0.75rem',
-                        fontFamily: 'var(--font-mono)',
-                        border: '1.5px solid var(--color-ink)',
-                        borderRadius: 4,
-                        background: canonicalAppUrl === iface.url ? 'var(--color-yellow)' : '#FFF',
-                        cursor: 'pointer',
-                        textAlign: 'left'
-                      }}
-                    >
-                      <strong>{iface.name}:</strong> {iface.url}
-                    </button>
-                  ))}
+                  {transportState.availableInterfaces.map(iface => {
+                    const targetUrl = iface.httpsUrl || iface.url;
+                    return (
+                      <button
+                        key={iface.ip}
+                        type="button"
+                        onClick={() => setSelectedUrlOverride(targetUrl)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '0.75rem',
+                          fontFamily: 'var(--font-mono)',
+                          border: '1.5px solid var(--color-card-border)',
+                          borderRadius: 4,
+                          background: canonicalAppUrl === targetUrl ? 'var(--color-yellow)' : 'var(--color-paper-card)',
+                          color: canonicalAppUrl === targetUrl ? '#292D29' : 'var(--color-ink)',
+                          cursor: 'pointer',
+                          textAlign: 'left'
+                        }}
+                      >
+                        <strong>{iface.name}:</strong> {targetUrl}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

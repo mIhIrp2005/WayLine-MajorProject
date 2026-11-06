@@ -7,6 +7,9 @@ import { IncidentsView } from './components/IncidentsView';
 import { SettingsView } from './components/SettingsView';
 import { SosModal } from './components/SosModal';
 import { AcousticLabView } from './components/experimental/AcousticLabView';
+import { VoiceRoomsView } from './components/voice/VoiceRoomsView';
+import { CallModal } from './components/voice/CallModal';
+import { FloatingCallBar } from './components/voice/FloatingCallBar';
 import { 
   LocalIdentity, 
   TransportState, 
@@ -144,6 +147,10 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === 'voice' && (
+          <VoiceRoomsView />
+        )}
+
         {activeTab === 'incidents' && (
           <IncidentsView
             identity={identity}
@@ -158,7 +165,10 @@ export const App: React.FC = () => {
             identity={identity}
             transportState={transportState}
             isOfflineReady={isOfflineReady}
-            onIdentityUpdated={(newId) => setIdentity(newId)}
+            onIdentityUpdated={(newId) => {
+              setIdentity(newId);
+              transport.updateIdentity(newId);
+            }}
             onDataCleared={loadData}
             onOpenAcousticLab={() => setActiveTab('acoustic-lab')}
           />
@@ -178,6 +188,12 @@ export const App: React.FC = () => {
         identity={identity}
         onIncidentCreated={loadData}
       />
+
+      {/* Voice 1-on-1 Call Notifications & Ringing Dialog */}
+      <CallModal />
+
+      {/* Persistent Active Call / Voice Room Floating Bar */}
+      <FloatingCallBar />
     </div>
   );
 };

@@ -384,12 +384,14 @@ export const AcousticLabView: React.FC<AcousticLabViewProps> = ({ localNodeName 
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 800, fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
+            <label htmlFor="symbol-timing-slider" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 800, fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
               <span>SYMBOL TIMING (SPEED VS ROBUSTNESS):</span>
               <span>{symbolDuration} ms</span>
             </label>
             <input
+              id="symbol-timing-slider"
               type="range"
+              aria-label="Symbol timing in milliseconds"
               min={30}
               max={80}
               step={5}
@@ -441,8 +443,8 @@ export const AcousticLabView: React.FC<AcousticLabViewProps> = ({ localNodeName 
             </div>
             <div style={{ 
               height: 12, 
-              background: '#FFFFFF', 
-              border: '1px solid var(--color-ink)', 
+              background: 'var(--color-paper-dark)', 
+              border: '1px solid var(--color-card-border)', 
               borderRadius: 4, 
               overflow: 'hidden' 
             }}>
@@ -462,8 +464,8 @@ export const AcousticLabView: React.FC<AcousticLabViewProps> = ({ localNodeName 
             </div>
             {lastDecodedPacket ? (
               <div style={{ 
-                background: '#FFFFFF', 
-                border: '1.5px solid var(--color-ink)', 
+                background: 'var(--color-paper-card)', 
+                border: '1.5px solid var(--color-card-border)', 
                 borderRadius: 'var(--radius-sm)', 
                 padding: '8px 10px', 
                 fontSize: '0.82rem',

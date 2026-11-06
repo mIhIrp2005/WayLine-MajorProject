@@ -88,12 +88,15 @@ export interface NetworkInterfaceInfo {
   name: string;
   ip: string;
   url: string;
+  httpsUrl?: string;
 }
 
 export interface TransportState {
   isCompanionConnected: boolean;
   activeTransport: string;
   listeningAddress: string;
+  httpsListeningAddress?: string | null;
+  hasHttps?: boolean;
   peerCount: number;
   isScanning: boolean;
   packetsSent: number;

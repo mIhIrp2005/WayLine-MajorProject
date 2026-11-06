@@ -188,7 +188,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                   <div style={{ 
                     marginTop: 12, 
                     padding: '8px 12px', 
-                    background: '#FFFFFF', 
+                    background: 'var(--color-paper)', 
                     border: '1.5px solid var(--color-ink)', 
                     borderRadius: 'var(--radius-sm)',
                     display: 'flex',

@@ -76,6 +76,19 @@ export const SosModal: React.FC<SosModalProps> = ({
     };
   }, [isOpen]);
 
+  // Handle Escape key dismissal
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cancelAutoSubmit();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   // When countdown reaches 0 and auto-submit is still active, trigger SOS dispatch
   useEffect(() => {
     if (isOpen && autoSubmitActive && countdown === 0 && !submitting) {
@@ -185,21 +198,40 @@ export const SosModal: React.FC<SosModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-dialog">
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { cancelAutoSubmit(); onClose(); } }}>
+      <div 
+        className="modal-dialog" 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="sos-dialog-title"
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ background: '#EA644B', padding: 6, borderRadius: 6, border: '2px solid #292D29' }}>
+            <div style={{ background: 'var(--color-coral)', padding: 6, borderRadius: 6, border: '2px solid var(--color-ink)' }}>
               <ShieldAlert size={24} color="#FFF" />
             </div>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 900 }}>EMERGENCY BROADCAST</h2>
+              <h2 id="sos-dialog-title" style={{ fontSize: '1.25rem', fontWeight: 900 }}>EMERGENCY BROADCAST</h2>
               <p style={{ fontSize: '0.75rem', color: 'var(--color-ink-muted)' }}>Local network distress beacon</p>
             </div>
           </div>
           <button 
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            onClick={() => {
+              cancelAutoSubmit();
+              onClose();
+            }}
+            aria-label="Close emergency broadcast"
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              cursor: 'pointer', 
+              padding: 8,
+              minWidth: 36,
+              minHeight: 36,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
             <X size={20} />
           </button>
@@ -208,9 +240,9 @@ export const SosModal: React.FC<SosModalProps> = ({
         {/* 10-Second Auto-Submit Emergency Banner */}
         {autoSubmitActive ? (
           <div style={{
-            background: '#EA644B',
+            background: 'var(--color-coral)',
             color: '#FFFFFF',
-            border: '2px solid #292D29',
+            border: '2px solid var(--color-card-border)',
             padding: '10px 14px',
             borderRadius: 'var(--radius-md)',
             marginBottom: 16,
@@ -236,9 +268,9 @@ export const SosModal: React.FC<SosModalProps> = ({
               onClick={cancelAutoSubmit}
               className="btn-tactile"
               style={{
-                background: '#FFFFFF',
-                color: '#EA644B',
-                border: '2px solid #292D29',
+                background: 'var(--color-paper-card)',
+                color: 'var(--color-coral)',
+                border: '2px solid var(--color-card-border)',
                 padding: '6px 12px',
                 fontSize: '0.78rem',
                 fontWeight: 800
@@ -307,7 +339,10 @@ export const SosModal: React.FC<SosModalProps> = ({
                   border: category === c.key ? '2px solid var(--color-ink)' : '1px solid var(--color-border)',
                   boxShadow: category === c.key ? 'var(--shadow-tactile)' : 'none'
                 }}
-                onClick={() => setCategory(c.key)}
+                onClick={() => {
+                  setCategory(c.key);
+                  cancelAutoSubmit();
+                }}
               >
                 {c.icon}
                 <span style={{ fontWeight: category === c.key ? 800 : 600 }}>{c.label}</span>
@@ -324,7 +359,11 @@ export const SosModal: React.FC<SosModalProps> = ({
           <textarea
             rows={2}
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onFocus={cancelAutoSubmit}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              cancelAutoSubmit();
+            }}
             placeholder="e.g. 2 adults trapped in attic, rising water, need extraction..."
             style={{
               width: '100%',
@@ -382,7 +421,11 @@ export const SosModal: React.FC<SosModalProps> = ({
             <input
               type="text"
               value={manualLocation}
-              onChange={(e) => setManualLocation(e.target.value)}
+              onFocus={cancelAutoSubmit}
+              onChange={(e) => {
+                setManualLocation(e.target.value);
+                cancelAutoSubmit();
+              }}
               placeholder="e.g. 2nd floor front room, next to red water tank..."
               style={{
                 width: '100%',

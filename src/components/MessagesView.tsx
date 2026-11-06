@@ -154,7 +154,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
+    <div className="messages-page-container">
       {/* Header */}
       <div className="page-header" style={{ marginBottom: 16 }}>
         <div className="page-title-group">
@@ -246,17 +246,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       </div>
 
       {/* Message List */}
-      <div style={{ 
-        flex: 1, 
-        overflowY: 'auto', 
-        padding: '16px', 
-        background: 'var(--color-paper-card)', 
-        border: '2px solid var(--color-ink)', 
-        borderRadius: 'var(--radius-lg)', 
-        boxShadow: 'var(--shadow-tactile)',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
+      <div className="messages-scroll-area">
         {messages.length === 0 ? (
           <div style={{ 
             margin: 'auto', 
@@ -280,7 +270,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 className={`msg-bubble ${isSelf ? 'outgoing' : 'incoming'} ${m.type === 'SOS' ? 'sos' : ''}`}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontWeight: 800, fontSize: '0.85rem', color: isSelf ? '#292D29' : '#EA644B' }}>
+                  <span style={{ fontWeight: 800, fontSize: '0.85rem', color: isSelf ? 'var(--color-ink)' : '#EA644B' }}>
                     {isSelf ? 'You' : m.senderName}
                   </span>
                   <span style={{ fontSize: '0.7rem', color: 'var(--color-ink-muted)', fontFamily: 'var(--font-mono)' }}>

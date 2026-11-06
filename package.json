@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "start": "node server/wayline-node.js",
-    "test": "node tests/hardening.test.js && node tests/crypto.test.js && node tests/chain-relay.test.js"
+    "cert:gen": "node server/generate-cert.js",
+    "test": "node tests/hardening.test.js && node tests/crypto.test.js && node tests/chain-relay.test.js && node tests/voice-signaling.test.js && node tests/host-redirect.test.js"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
