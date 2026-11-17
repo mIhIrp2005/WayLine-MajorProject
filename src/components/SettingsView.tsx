@@ -163,6 +163,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }}>
             <div style={{ fontWeight: 800, marginBottom: 4 }}>Responder Device TLS Trust Profile:</div>
             <div>Captive portals land on plain HTTP to ensure Android/iOS captive network assistants never crash on self-signed certs. To use secure WebRTC audio/mic calling over HTTPS (port 8767), responders can install the host's CA certificate.</div>
+            <div style={{ marginTop: 6, fontSize: '0.74rem', color: 'var(--color-ink-muted)' }}>
+              <strong>Android:</strong> Settings → Security → Install certificate → CA certificate.<br />
+              <strong>iOS:</strong> Download profile → Settings → Profile Downloaded → Install, then Settings → General → About → Certificate Trust Settings → Enable Full Trust.
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -177,7 +181,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </a>
             {transportState.hasHttps && transportState.httpsListeningAddress && (
               <a
-                href={transportState.httpsListeningAddress}
+                href={transportState.httpsListeningAddress.startsWith('http') ? transportState.httpsListeningAddress : `https://${transportState.httpsListeningAddress}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-tactile btn-sm"

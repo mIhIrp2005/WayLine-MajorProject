@@ -646,6 +646,39 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 : "Scan with phone camera to automatically connect to the field hotspot."}
             </p>
 
+            {qrMode === 'app' && transportState.hasHttps && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10, justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-tactile btn-sm"
+                  onClick={() => {
+                    const httpUrl = canonicalAppUrl.replace(/^https:/, 'http:').replace(/:8767/, ':8765');
+                    setSelectedUrlOverride(httpUrl);
+                  }}
+                  style={{
+                    background: canonicalAppUrl.startsWith('http:') ? 'var(--color-yellow)' : 'var(--color-paper-card)',
+                    fontSize: '0.72rem'
+                  }}
+                >
+                  HTTP (Fast Join • No SSL warnings)
+                </button>
+                <button
+                  type="button"
+                  className="btn-tactile btn-sm"
+                  onClick={() => {
+                    const httpsUrl = canonicalAppUrl.replace(/^http:/, 'https:').replace(/:8765/, ':8767');
+                    setSelectedUrlOverride(httpsUrl);
+                  }}
+                  style={{
+                    background: canonicalAppUrl.startsWith('https:') ? 'var(--color-yellow)' : 'var(--color-paper-card)',
+                    fontSize: '0.72rem'
+                  }}
+                >
+                  HTTPS (Voice Calling)
+                </button>
+              </div>
+            )}
+
             {qrMode === 'wifi' && (
               <div style={{ marginBottom: 12, textAlign: 'left', display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>
@@ -711,7 +744,7 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
             {typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent) && (
               <div style={{ marginTop: 10 }}>
                 <a
-                  href={canonicalAppUrl.replace(/^http:\/\//, 'intent://') + '#Intent;scheme=http;package=com.android.chrome;end'}
+                  href={canonicalAppUrl.replace(/^https?:\/\//, 'intent://') + `#Intent;scheme=${canonicalAppUrl.startsWith('https') ? 'https' : 'http'};package=com.android.chrome;end`}
                   className="btn-tactile btn-sm"
                   style={{ textDecoration: 'none', background: '#292D29', color: '#FFF', display: 'inline-block' }}
                 >
@@ -720,35 +753,51 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
               </div>
             )}
 
-            {transportState.availableInterfaces && transportState.availableInterfaces.length > 1 && (
+            {canonicalAppUrl.startsWith('https:') && (
+              <div style={{
+                marginTop: 10,
+                padding: '8px 10px',
+                background: '#FEF3C7',
+                border: '1.5px solid #D97706',
+                borderRadius: 6,
+                fontSize: '0.74rem',
+                color: '#92400E',
+                textAlign: 'left',
+                lineHeight: 1.4
+              }}>
+                🔒 <strong>HTTPS on Mobile:</strong> If Chrome/Safari warns <em>"Connection is not private"</em>, tap <strong>Advanced → Proceed</strong>. Or install the Root CA cert in Settings for trusted WebRTC voice calls.
+              </div>
+            )}
+
+            {transportState.availableInterfaces && transportState.availableInterfaces.length > 0 && (
               <div style={{ marginTop: 12, textAlign: 'left' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-ink-muted)', marginBottom: 4 }}>
                   DETECTED ADAPTERS (click to switch):
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {transportState.availableInterfaces.map(iface => {
-                    const targetUrl = iface.httpsUrl || iface.url;
-                    return (
-                      <button
-                        key={iface.ip}
-                        type="button"
-                        onClick={() => setSelectedUrlOverride(targetUrl)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '0.75rem',
-                          fontFamily: 'var(--font-mono)',
-                          border: '1.5px solid var(--color-card-border)',
-                          borderRadius: 4,
-                          background: canonicalAppUrl === targetUrl ? 'var(--color-yellow)' : 'var(--color-paper-card)',
-                          color: canonicalAppUrl === targetUrl ? '#292D29' : 'var(--color-ink)',
-                          cursor: 'pointer',
-                          textAlign: 'left'
-                        }}
-                      >
-                        <strong>{iface.name}:</strong> {targetUrl}
-                      </button>
-                    );
-                  })}
+                  {transportState.availableInterfaces.flatMap(iface => [
+                    { label: `${iface.name} [HTTP - Instant Join]`, url: iface.url },
+                    ...(iface.httpsUrl ? [{ label: `${iface.name} [HTTPS - Voice Calling]`, url: iface.httpsUrl }] : [])
+                  ]).map(item => (
+                    <button
+                      key={item.url}
+                      type="button"
+                      onClick={() => setSelectedUrlOverride(item.url)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        fontFamily: 'var(--font-mono)',
+                        border: '1.5px solid var(--color-card-border)',
+                        borderRadius: 4,
+                        background: canonicalAppUrl === item.url ? 'var(--color-yellow)' : 'var(--color-paper-card)',
+                        color: canonicalAppUrl === item.url ? '#292D29' : 'var(--color-ink)',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <strong>{item.label}:</strong> {item.url}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}

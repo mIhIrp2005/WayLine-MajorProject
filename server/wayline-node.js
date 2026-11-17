@@ -55,7 +55,7 @@ function loadSslCredentials() {
   if (!needsGen && fs.existsSync(metaPath)) {
     try {
       const saved = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      if (saved.ips !== currentIpKey) needsGen = true;
+      if (saved.ips !== currentIpKey || saved.v !== 2) needsGen = true;
     } catch { needsGen = true; }
   } else if (!fs.existsSync(metaPath)) {
     needsGen = true;
@@ -65,7 +65,7 @@ function loadSslCredentials() {
     try {
       const ok = generateCertificates();
       if (ok) {
-        fs.writeFileSync(metaPath, JSON.stringify({ ips: currentIpKey }), 'utf8');
+        fs.writeFileSync(metaPath, JSON.stringify({ ips: currentIpKey, v: 2 }), 'utf8');
       }
     } catch (e) {
       console.warn('[WAYLINE] Auto-certificate generation note:', e.message);
