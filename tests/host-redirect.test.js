@@ -99,16 +99,16 @@ const mockRedirectLayer = new HostRedirectLayer({
   },
   getDynamicPwaUrl: (clientIp, rawLocal) => {
     const host = rawLocal || '192.168.137.1';
-    return `https://${host}:8767/`;
+    return `http://${host}:8765/`;
   }
 });
 
 // Dynamic PWA endpoint resolution test
 const pwaUrlHotspot = mockRedirectLayer.getDynamicPwaUrl('192.168.137.45', '192.168.137.1');
-assert.strictEqual(pwaUrlHotspot, 'https://192.168.137.1:8767/');
+assert.strictEqual(pwaUrlHotspot, 'http://192.168.137.1:8765/');
 
 const pwaUrlEthernet = mockRedirectLayer.getDynamicPwaUrl('192.168.0.50', '192.168.0.105');
-assert.strictEqual(pwaUrlEthernet, 'https://192.168.0.105:8767/');
+assert.strictEqual(pwaUrlEthernet, 'http://192.168.0.105:8765/');
 
 // 5. Test Multi-Mode Handling (Offline Mesh vs Internet Fallback)
 console.log('Testing Multi-Mode logic (Offline Mesh vs Internet Fallback)...');

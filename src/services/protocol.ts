@@ -1,5 +1,6 @@
 import { WaylinePacket, MessageType, StoredMessage, EmergencyIncident, LocalIdentity } from '../types';
 import { storage } from './storage';
+import { signPacketData, verifyPacketSignature, deriveFingerprint } from './crypto';
 
 const PROTOCOL_VERSION = 1;
 const DEFAULT_TTL = 3;
@@ -58,6 +59,58 @@ class WaylineProtocol {
     return crc.toString(16).padStart(4, '0');
   }
 
+  // Generate canonical string for cryptographic signing & verification
+  canonicalString(packet: Partial<WaylinePacket>): string {
+    const payloadStr = typeof packet.payload === 'object' ? JSON.stringify(packet.payload) : String(packet.payload || '');
+    return `${packet.version}:${packet.id}:${packet.senderId}:${packet.recipientId}:${packet.type}:${packet.timestamp}:${payloadStr}`;
+  }
+
+  // Sign packet with ECDSA P-256 (or fallback to CRC-16)
+  async signPacket(packet: WaylinePacket, signingKey?: CryptoKey): Promise<WaylinePacket> {
+    if (signingKey) {
+      try {
+        const canonical = this.canonicalString(packet);
+        packet.signature = await signPacketData(canonical, signingKey);
+        return packet;
+      } catch (err) {
+        console.warn('[Protocol] ECDSA signing error:', err);
+      }
+    }
+    packet.signature = this.calculateChecksum(packet);
+    return packet;
+  }
+
+  // Verify packet authenticity & reject spoofed node identities
+  async verifyPacketAuthenticity(packet: WaylinePacket): Promise<{ valid: boolean; signed: boolean; reason?: string }> {
+    if (packet.senderPubKey && packet.signature) {
+      // 1. Verify Node ID binding (Anti-Spoofing): senderId should match derived public key fingerprint
+      if (packet.senderId.startsWith('node_')) {
+        const expectedFp = await deriveFingerprint(packet.senderPubKey);
+        if (packet.senderId !== expectedFp && packet.senderId.length >= 15) {
+          return { valid: false, signed: true, reason: 'Sender ID does not match cryptographic public key fingerprint' };
+        }
+      }
+
+      // 2. Verify ECDSA signature against sender's public key
+      const canonical = this.canonicalString(packet);
+      const isValid = await verifyPacketSignature(canonical, packet.signature, packet.senderPubKey);
+      if (!isValid) {
+        return { valid: false, signed: true, reason: 'Cryptographic signature mismatch (tampered or spoofed packet)' };
+      }
+      return { valid: true, signed: true };
+    }
+
+    // Fallback: Checksum verification for legacy unkeyed packets
+    if (packet.signature && packet.signature.length === 4) {
+      const expectedCrc = this.calculateChecksum(packet);
+      if (packet.signature !== expectedCrc) {
+        return { valid: false, signed: false, reason: 'CRC checksum mismatch' };
+      }
+    }
+
+    return { valid: true, signed: false };
+  }
+
   // Create a chat packet
   createChatPacket(
     identity: LocalIdentity,
@@ -77,7 +130,9 @@ class WaylineProtocol {
       timestamp,
       ttl: DEFAULT_TTL,
       hopCount: 0,
-      payload: { content }
+      payload: { content },
+      senderPubKey: identity.publicKey,
+      ecdhPubKey: identity.ecdhPublicKey
     };
     packet.signature = this.calculateChecksum(packet);
 
@@ -122,7 +177,9 @@ class WaylineProtocol {
         category,
         description,
         location
-      }
+      },
+      senderPubKey: identity.publicKey,
+      ecdhPubKey: identity.ecdhPublicKey
     };
     packet.signature = this.calculateChecksum(packet);
 
@@ -164,7 +221,9 @@ class WaylineProtocol {
       payload: {
         ackMessageId: targetPacket.id,
         targetType: targetPacket.type
-      }
+      },
+      senderPubKey: identity.publicKey,
+      ecdhPubKey: identity.ecdhPublicKey
     };
     packet.signature = this.calculateChecksum(packet);
     this.markSeen(id);
@@ -193,7 +252,9 @@ class WaylineProtocol {
       payload: {
         incidentId,
         status
-      }
+      },
+      senderPubKey: identity.publicKey,
+      ecdhPubKey: identity.ecdhPublicKey
     };
     packet.signature = this.calculateChecksum(packet);
     this.markSeen(id);

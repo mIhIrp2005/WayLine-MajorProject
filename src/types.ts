@@ -30,12 +30,15 @@ export interface WaylinePacket {
   type: MessageType;
   senderId: string;              // Node ID
   senderName: string;            // User display name
-  recipientId: string;           // '*' for broadcast or specific Node ID
+  recipientId: string;           // '*' for broadcast or specific Node ID (or blinded mask)
   timestamp: number;
   ttl: number;                   // Maximum hops (default 3)
   hopCount: number;              // Current hop count (starts at 0)
   payload: any;                  // Message text, SOS details, or ACK info
-  signature?: string;            // Checksum / integrity hash
+  signature?: string;            // Checksum / integrity hash or ECDSA signature
+  senderPubKey?: string;         // ECDSA P-256 public key hex for cryptographic identity
+  ecdhPubKey?: string;           // ECDH P-256 public key hex for PFS
+  isBlinded?: boolean;           // True if recipientId has been blinded
 }
 
 export interface StoredMessage {
@@ -76,12 +79,18 @@ export interface DiscoveredPeer {
   lastSeen: number;
   isRelay: boolean;
   latencyMs?: number;
+  publicKey?: string;            // ECDSA P-256 public key hex
+  fingerprint?: string;          // Short identity fingerprint
+  ecdhPublicKey?: string;        // ECDH P-256 public key hex for PFS
 }
 
 export interface LocalIdentity {
   nodeId: string;
   nodeName: string;
   created: number;
+  publicKey?: string;            // ECDSA P-256 public key hex
+  fingerprint?: string;          // Cryptographic identity fingerprint
+  ecdhPublicKey?: string;        // ECDH P-256 public key hex
 }
 
 export interface NetworkInterfaceInfo {

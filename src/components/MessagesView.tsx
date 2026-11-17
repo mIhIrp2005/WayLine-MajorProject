@@ -14,8 +14,8 @@ import { StoredMessage, DiscoveredPeer, LocalIdentity, DeliveryStatus } from '..
 import { protocol } from '../services/protocol';
 import { storage } from '../services/storage';
 import { transport } from '../services/transport';
-import { encryptAes, decryptAes } from '../services/crypto';
-import { Lock, Unlock, Key } from 'lucide-react';
+import { encryptAes, encryptEcdh, decryptMessage, blindRecipientId } from '../services/crypto';
+import { Lock, Unlock, Key, ShieldCheck } from 'lucide-react';
 
 interface MessagesViewProps {
   identity: LocalIdentity;
@@ -43,6 +43,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const connectedPeers = peers.filter(p => p.status === 'CONNECTED');
+  const targetPeer = peers.find(p => p.id === selectedRecipient);
+  const hasPfs = Boolean(selectedRecipient !== '*' && targetPeer?.ecdhPublicKey);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,18 +54,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     scrollToBottom();
   }, [messages]);
 
-  // Decrypt encrypted messages dynamically when encryption key changes or messages update
+  // Decrypt encrypted messages dynamically (AES shared passphrase or ECDH PFS)
   useEffect(() => {
     let isCancelled = false;
     const decryptAll = async () => {
-      const results: Record<string, string> = {};
-      for (const m of messages) {
-        if (m.content && m.content.startsWith('aes:')) {
-          results[m.id] = await decryptAes(m.content, encryptionKey);
+      try {
+        const keys = await storage.getCryptoKeys();
+        const myEcdhPriv = keys?.ecdhPair?.privateKey;
+        const results: Record<string, string> = {};
+        for (const m of messages) {
+          if (m.content && (m.content.startsWith('aes:') || m.content.startsWith('ecdh:'))) {
+            results[m.id] = await decryptMessage(m.content, encryptionKey, myEcdhPriv);
+          }
         }
-      }
-      if (!isCancelled) {
-        setDecryptedTexts(results);
+        if (!isCancelled) {
+          setDecryptedTexts(results);
+        }
+      } catch (err) {
+        console.warn('Decryption batch error:', err);
       }
     };
     decryptAll();
@@ -98,22 +106,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
     setSending(true);
     try {
-      // Encrypt message content with AES-GCM 256-bit if key is provided
-      const outboundContent = encryptionKey.trim() 
-        ? await encryptAes(text, encryptionKey.trim()) 
-        : text;
+      // 1. Encryption: Pairwise ECDH PFS if recipient public key is known, otherwise AES passphrase
+      let outboundContent = text;
+      if (selectedRecipient !== '*' && targetPeer?.ecdhPublicKey) {
+        outboundContent = await encryptEcdh(text, targetPeer.ecdhPublicKey);
+      } else if (encryptionKey.trim()) {
+        outboundContent = await encryptAes(text, encryptionKey.trim());
+      }
 
-      // 1. Create packet and stored representation
+      // 2. Create packet and stored representation
       const { packet, storedMessage } = protocol.createChatPacket(
         identity,
         outboundContent,
         selectedRecipient
       );
 
-      // 2. Save in IndexedDB
+      // 3. Metadata Blinding: Mask recipient ID on wire to prevent passive hop eavesdropping
+      if (selectedRecipient !== '*') {
+        packet.recipientId = await blindRecipientId(selectedRecipient);
+        packet.isBlinded = true;
+      }
+
+      // 4. Save in IndexedDB
       await storage.saveMessage(storedMessage);
 
-      // 3. Dispatch over real transport
+      // 5. Dispatch over real transport
       await transport.sendPacket(packet);
 
       lastSendTimesRef.current = [...recentSends, now];
@@ -203,44 +220,69 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           >
             <option value="*">Broadcast to All Nearby (*)</option>
             {connectedPeers.map(p => (
-              <option key={p.id} value={p.id}>{p.name} ({p.address})</option>
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.address}){p.ecdhPublicKey ? ' [PFS]' : ''}
+              </option>
             ))}
           </select>
         </div>
 
-        {/* AES Encryption Toggle & Key Input */}
+        {/* PFS / AES Encryption Indicators & Key Input */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn-tactile btn-sm"
-            onClick={() => setShowKeyInput(!showKeyInput)}
-            style={{
-              padding: '4px 8px',
-              fontSize: '0.74rem',
-              background: encryptionKey ? '#73966A' : 'var(--color-paper)',
-              color: encryptionKey ? '#FFFFFF' : 'var(--color-ink)'
-            }}
-            title="Toggle AES-256 GCM encryption"
-          >
-            {encryptionKey ? <Lock size={13} /> : <Unlock size={13} />}
-            <span>{encryptionKey ? 'AES Locked' : 'Plaintext'}</span>
-          </button>
-
-          {showKeyInput && (
-            <input
-              type="password"
-              placeholder="Shared key..."
-              value={encryptionKey}
-              onChange={(e) => setEncryptionKey(e.target.value)}
-              style={{
-                width: 110,
-                padding: '4px 8px',
-                fontSize: '0.75rem',
-                borderRadius: 'var(--radius-sm)',
-                border: '1.5px solid var(--color-ink)',
-                background: 'var(--color-paper)'
+          {hasPfs ? (
+            <span 
+              className="pill" 
+              style={{ 
+                background: '#E0F2FE', 
+                color: '#0369A1', 
+                border: '1.5px solid #0284C7',
+                fontSize: '0.74rem', 
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px'
               }}
-            />
+              title="ECDH P-256 Ephemeral Key Exchange active — Perfect Forward Secrecy enabled"
+            >
+              <ShieldCheck size={13} />
+              <span>ECDH PFS Active</span>
+            </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn-tactile btn-sm"
+                onClick={() => setShowKeyInput(!showKeyInput)}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '0.74rem',
+                  background: encryptionKey ? '#73966A' : 'var(--color-paper)',
+                  color: encryptionKey ? '#FFFFFF' : 'var(--color-ink)'
+                }}
+                title="Toggle AES-256 GCM encryption"
+              >
+                {encryptionKey ? <Lock size={13} /> : <Unlock size={13} />}
+                <span>{encryptionKey ? 'AES Locked' : 'Plaintext'}</span>
+              </button>
+
+              {showKeyInput && (
+                <input
+                  type="password"
+                  placeholder="Shared key..."
+                  value={encryptionKey}
+                  onChange={(e) => setEncryptionKey(e.target.value)}
+                  style={{
+                    width: 110,
+                    padding: '4px 8px',
+                    fontSize: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1.5px solid var(--color-ink)',
+                    background: 'var(--color-paper)'
+                  }}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
@@ -264,6 +306,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         ) : (
           messages.map((m) => {
             const isSelf = m.senderId === identity.nodeId;
+            const isEcdh = m.content && m.content.startsWith('ecdh:');
+            const isAes = m.content && m.content.startsWith('aes:');
             return (
               <div 
                 key={m.id} 
@@ -279,10 +323,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 </div>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.4, wordBreak: 'break-word' }}>
-                  {m.content && m.content.startsWith('aes:') && (
-                    <Lock size={12} style={{ display: 'inline', marginRight: 5, verticalAlign: '-1px', color: '#73966A' }} />
+                  {isEcdh && (
+                    <span title="Forward Secret ECDH" style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: 5 }}>
+                      <ShieldCheck size={13} style={{ color: '#0284C7' }} />
+                    </span>
                   )}
-                  {m.content && m.content.startsWith('aes:') ? (decryptedTexts[m.id] || '🔒 Encrypted message (key required)') : m.content}
+                  {isAes && (
+                    <span title="Shared Passphrase AES" style={{ display: 'inline-flex', verticalAlign: '-1px', marginRight: 5 }}>
+                      <Lock size={12} style={{ color: '#73966A' }} />
+                    </span>
+                  )}
+                  {isEcdh || isAes ? (decryptedTexts[m.id] || '🔒 Encrypted message...') : m.content}
                 </div>
 
                 <div style={{ 

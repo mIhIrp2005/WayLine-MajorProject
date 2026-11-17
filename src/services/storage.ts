@@ -1,11 +1,21 @@
 // WAYLINE Local-First IndexedDB Storage Service
 import { StoredMessage, EmergencyIncident, DiscoveredPeer, LocalIdentity } from '../types';
+import { 
+  generateIdentityKeyPair, 
+  exportIdentityKeys, 
+  importIdentityKeys,
+  generateEcdhKeyPair,
+  exportEcdhKeys,
+  importEcdhKeys,
+  deriveFingerprint
+} from './crypto';
 
 const DB_NAME = 'wayline_offline_db';
 const DB_VERSION = 2;
 
 class WaylineStorage {
   private dbPromise: Promise<IDBDatabase> | null = null;
+  private cachedCryptoKeys: { signingPair: CryptoKeyPair; ecdhPair: CryptoKeyPair } | null = null;
 
   private getDB(): Promise<IDBDatabase> {
     if (this.dbPromise) return this.dbPromise;
@@ -53,31 +63,92 @@ class WaylineStorage {
     return this.dbPromise;
   }
 
-  // --- Identity ---
-  async getOrCreateIdentity(): Promise<LocalIdentity> {
+  // --- Identity & Cryptographic Keys ---
+  async getCryptoKeys(): Promise<{ signingPair: CryptoKeyPair; ecdhPair: CryptoKeyPair }> {
+    if (this.cachedCryptoKeys) return this.cachedCryptoKeys;
+
     const db = await this.getDB();
+    const stored = await new Promise<any>((resolve) => {
+      const tx = db.transaction('identity', 'readonly');
+      const store = tx.objectStore('identity');
+      const req = store.get('crypto_keys');
+      req.onsuccess = () => resolve(req.result?.data);
+      req.onerror = () => resolve(null);
+    });
+
+    if (stored && stored.signing && stored.ecdh) {
+      try {
+        const signingPair = await importIdentityKeys(stored.signing.publicKeyHex, stored.signing.privateKeyJwk);
+        const ecdhPair = await importEcdhKeys(stored.ecdh.publicKeyHex, stored.ecdh.privateKeyJwk);
+        this.cachedCryptoKeys = { signingPair, ecdhPair };
+        return this.cachedCryptoKeys;
+      } catch (e) {
+        console.warn('Failed to import stored crypto keys, regenerating:', e);
+      }
+    }
+
+    // Generate new keypairs
+    const signingPair = await generateIdentityKeyPair();
+    const ecdhPair = await generateEcdhKeyPair();
+    const exportedSigning = await exportIdentityKeys(signingPair);
+    const exportedEcdh = await exportEcdhKeys(ecdhPair);
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('identity', 'readwrite');
+      tx.objectStore('identity').put({
+        key: 'crypto_keys',
+        data: { signing: exportedSigning, ecdh: exportedEcdh }
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    this.cachedCryptoKeys = { signingPair, ecdhPair };
+    return this.cachedCryptoKeys;
+  }
+
+  async getOrCreateIdentity(): Promise<LocalIdentity> {
+    const keys = await this.getCryptoKeys();
+    const db = await this.getDB();
+    const exportedSigning = await exportIdentityKeys(keys.signingPair);
+    const exportedEcdh = await exportEcdhKeys(keys.ecdhPair);
+    const fingerprint = await deriveFingerprint(exportedSigning.publicKeyHex);
+
     return new Promise((resolve, reject) => {
       const tx = db.transaction('identity', 'readonly');
       const store = tx.objectStore('identity');
       const req = store.get('local_node');
 
       req.onsuccess = async () => {
+        let identity: LocalIdentity;
         if (req.result && req.result.data) {
-          resolve(req.result.data);
+          identity = req.result.data;
+          // Ensure keys and fingerprint are populated
+          if (!identity.publicKey || !identity.fingerprint || !identity.ecdhPublicKey) {
+            identity.publicKey = exportedSigning.publicKeyHex;
+            identity.fingerprint = fingerprint;
+            identity.ecdhPublicKey = exportedEcdh.publicKeyHex;
+            const writeTx = db.transaction('identity', 'readwrite');
+            writeTx.objectStore('identity').put({ key: 'local_node', data: identity });
+          }
+          resolve(identity);
         } else {
           // Generate new identity
           const randomSuffix = Math.floor(1000 + Math.random() * 9000);
           const platformName = navigator.userAgent.includes('Android') ? 'Android Phone' : 
                                navigator.userAgent.includes('Windows') ? 'Windows PC' : 'Field Device';
-          const newId: LocalIdentity = {
-            nodeId: 'node_' + Math.random().toString(36).substring(2, 10),
+          identity = {
+            nodeId: fingerprint || ('node_' + Math.random().toString(36).substring(2, 10)),
             nodeName: `${platformName} #${randomSuffix}`,
-            created: Date.now()
+            created: Date.now(),
+            publicKey: exportedSigning.publicKeyHex,
+            fingerprint,
+            ecdhPublicKey: exportedEcdh.publicKeyHex
           };
 
           const writeTx = db.transaction('identity', 'readwrite');
-          writeTx.objectStore('identity').put({ key: 'local_node', data: newId });
-          writeTx.oncomplete = () => resolve(newId);
+          writeTx.objectStore('identity').put({ key: 'local_node', data: identity });
+          writeTx.oncomplete = () => resolve(identity);
           writeTx.onerror = () => reject(writeTx.error);
         }
       };

@@ -164,13 +164,27 @@ const primaryIface = activeInterfaces[0] || { name: 'Loopback', address: '127.0.
 const LOCAL_IP = primaryIface.address;
 const IS_VERBOSE = process.argv.includes('--verbose');
 
+function ipToInt(ip) {
+  return String(ip).split('.').reduce((acc, octet) => ((acc << 8) + Number(octet)) >>> 0, 0);
+}
+
+function isIpInSubnet(ip, ifaceIp, netmask) {
+  try {
+    const ipInt = ipToInt(ip);
+    const ifaceInt = ipToInt(ifaceIp);
+    const maskInt = ipToInt(netmask || '255.255.255.0');
+    return (ipInt & maskInt) === (ifaceInt & maskInt);
+  } catch {
+    return false;
+  }
+}
+
 // Helper to dynamically match client subnet to the best local interface IP
 function getBestIpForClient(clientIp) {
   const ifaces = getNetworkInterfaces();
   if (clientIp) {
     const clean = String(clientIp).replace(/^.*:/, '');
-    const clientSubnet3 = clean.split('.').slice(0, 3).join('.');
-    const matched = ifaces.find(i => i.address.startsWith(clientSubnet3 + '.'));
+    const matched = ifaces.find(i => isIpInSubnet(clean, i.address, i.netmask));
     if (matched) return matched.address;
   }
   return ifaces[0]?.address || LOCAL_IP;
@@ -222,23 +236,26 @@ const handleHttpRequest = (req, res) => {
   }
 
   // RFC 8908 Captive Portal API & Probe Redirects (Android, iOS, Windows)
+  // Target plain HTTP port so mobile captive webviews (Android CaptivePortalLogin & iOS CNA) never fail with self-signed SSL errors
   if (url.pathname === '/.well-known/captive-portal' || url.pathname === '/captive-portal') {
     const rawLocal = (req.socket.localAddress || '').replace(/^.*:/, '');
     const clientIp = (req.socket.remoteAddress || '').replace(/^.*:/, '');
     const targetHost = (rawLocal && rawLocal !== '127.0.0.1' && rawLocal !== '0.0.0.0')
       ? rawLocal 
       : getBestIpForClient(clientIp);
-    const useHttps = Boolean(httpsServer || sslCredentials);
-    const target = `${useHttps ? 'https' : 'http'}://${targetHost}:${useHttps ? HTTPS_PORT : HTTP_PORT}/`;
+    const target = `http://${targetHost}:${HTTP_PORT}/`;
     res.writeHead(200, {
       'Content-Type': 'application/captive+json',
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'no-cache, no-store, must-revalidate'
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
     res.end(JSON.stringify({
       captive: true,
       'user-portal-url': target,
-      'venue-info-url': target
+      'venue-info-url': target,
+      'can-extend-session': false
     }));
     return;
   }
@@ -249,12 +266,13 @@ const handleHttpRequest = (req, res) => {
     const targetHost = (rawLocal && rawLocal !== '127.0.0.1' && rawLocal !== '0.0.0.0')
       ? rawLocal 
       : getBestIpForClient(clientIp);
-    const useHttps = Boolean(httpsServer || sslCredentials);
-    const target = `${useHttps ? 'https' : 'http'}://${targetHost}:${useHttps ? HTTPS_PORT : HTTP_PORT}/`;
+    const target = `http://${targetHost}:${HTTP_PORT}/`;
     res.writeHead(302, { 
       'Location': target, 
       'Content-Type': 'text/html',
-      'Cache-Control': 'no-cache, no-store, must-revalidate'
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
     res.end(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${target}"><title>WAYLINE Emergency Network</title></head><body><script>window.location.replace("${target}");</script><p><a href="${target}">Connect to WAYLINE</a></p></body></html>`);
     return;
@@ -1053,8 +1071,7 @@ const hostRedirect = new HostRedirectLayer({
     const targetHost = (rawLocal && rawLocal !== '127.0.0.1' && rawLocal !== '0.0.0.0')
       ? rawLocal 
       : getBestIpForClient(clientIp);
-    const useHttps = Boolean(httpsServer || sslCredentials);
-    return `${useHttps ? 'https' : 'http'}://${targetHost}:${useHttps ? HTTPS_PORT : HTTP_PORT}/`;
+    return `http://${targetHost}:${HTTP_PORT}/`;
   },
   isVerbose: IS_VERBOSE,
   upstreamDns: process.env.WAYLINE_UPSTREAM_DNS || '8.8.8.8'

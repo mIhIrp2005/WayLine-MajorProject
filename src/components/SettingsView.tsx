@@ -6,7 +6,11 @@ import {
   Trash2, 
   User, 
   Radio, 
-  Volume2
+  Volume2,
+  ShieldCheck,
+  Download,
+  Lock,
+  KeyRound
 } from 'lucide-react';
 import { LocalIdentity, TransportState } from '../types';
 import { storage } from '../services/storage';
@@ -102,8 +106,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </div>
 
-            <div style={{ marginBottom: 16, fontSize: '0.78rem', fontFamily: 'var(--font-mono)', color: 'var(--color-ink-muted)' }}>
-              Unique Node Hash: <code>{identity.nodeId}</code>
+            <div style={{ marginBottom: 14, fontSize: '0.78rem', fontFamily: 'var(--font-mono)', color: 'var(--color-ink-muted)' }}>
+              <div>Node ID: <code>{identity.nodeId}</code></div>
+              {identity.fingerprint && (
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, color: '#0369A1' }}>
+                  <ShieldCheck size={14} color="#0284C7" />
+                  <span>ECDSA P-256 Identity: <code>{identity.fingerprint}</code></span>
+                </div>
+              )}
+              {identity.ecdhPublicKey && (
+                <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#73966A' }}>
+                  <span>✓ ECDH P-256 Forward Secrecy Key active</span>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -121,6 +136,57 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               )}
             </div>
           </form>
+        </div>
+
+        {/* Trust Profile & Transport Security Card */}
+        <div className="bento-card">
+          <div className="card-header">
+            <span className="card-title">
+              <ShieldCheck size={16} />
+              HOTSPOT TRUST & TLS SECURITY
+            </span>
+            <span className="pill pill-green">WEB CRYPTO NATIVE</span>
+          </div>
+
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-ink-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+            WAYLINE uses native Web Crypto (AES-256-GCM, ECDH PFS, and ECDSA signatures) so application messages remain 100% encrypted regardless of the transport certificate.
+          </p>
+
+          <div style={{ 
+            padding: '10px 12px', 
+            background: 'var(--color-paper)', 
+            border: '1.5px solid var(--color-ink)', 
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.78rem',
+            marginBottom: 12,
+            lineHeight: 1.4
+          }}>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Responder Device TLS Trust Profile:</div>
+            <div>Captive portals land on plain HTTP to ensure Android/iOS captive network assistants never crash on self-signed certs. To use secure WebRTC audio/mic calling over HTTPS (port 8767), responders can install the host's CA certificate.</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <a 
+              href="/wayline-ca.crt" 
+              download="wayline-ca.crt"
+              className="btn-tactile btn-sm"
+              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Download size={14} />
+              Download Root Cert (.crt)
+            </a>
+            {transportState.hasHttps && transportState.httpsListeningAddress && (
+              <a
+                href={transportState.httpsListeningAddress}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-tactile btn-sm"
+                style={{ textDecoration: 'none', background: '#E0F2FE', color: '#0369A1' }}
+              >
+                Open HTTPS WebRTC Node
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Dynamic Host Connection Card */}

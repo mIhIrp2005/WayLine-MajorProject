@@ -30,6 +30,37 @@ export const App: React.FC = () => {
   const [incidents, setIncidents] = useState<EmergencyIncident[]>([]);
   const [isOfflineReady, setIsOfflineReady] = useState(false);
   const [isSosOpen, setIsSosOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const isStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true
+  );
+
+  // Listen for native PWA installation prompt
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      if (!sessionStorage.getItem('wayline_install_dismissed')) {
+        setShowInstallBanner(true);
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setShowInstallBanner(false);
+      }
+      setDeferredPrompt(null);
+    }
+  };
 
   // Load persistent local data
   const loadData = useCallback(async () => {
@@ -101,6 +132,50 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      {/* PWA Home Screen Installation Prompt */}
+      {showInstallBanner && !isStandalone && (
+        <div style={{
+          background: 'var(--color-yellow)',
+          color: '#292D29',
+          padding: '8px 14px',
+          borderBottom: '2px solid var(--color-ink)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 8,
+          fontSize: '0.85rem',
+          fontWeight: 700,
+          zIndex: 90
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '1.1rem' }}>📲</span>
+            <span>Install WAYLINE on your Home Screen for instant 1-tap offline opening without typing URLs</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn-tactile btn-sm"
+              style={{ background: '#292D29', color: '#FFF' }}
+              onClick={handleInstallClick}
+            >
+              Add to Home Screen
+            </button>
+            <button
+              type="button"
+              className="btn-tactile btn-sm"
+              style={{ background: '#FFF' }}
+              onClick={() => {
+                setShowInstallBanner(false);
+                sessionStorage.setItem('wayline_install_dismissed', '1');
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Navigation Shell */}
       <Navigation
         activeTab={activeTab}

@@ -249,6 +249,7 @@ export class HostRedirectLayer {
         }
 
         // Standard OS captive probe and web traffic redirect
+        const chromeIntentUrl = targetUrl.replace(/^http:\/\//, 'intent://') + '#Intent;scheme=http;package=com.android.chrome;end';
         res.writeHead(302, {
           'Location': targetUrl,
           'Content-Type': 'text/html',
@@ -256,7 +257,7 @@ export class HostRedirectLayer {
           'Pragma': 'no-cache',
           'Expires': '0'
         });
-        res.end(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${targetUrl}"><title>WAYLINE Emergency Network</title></head><body><script>window.location.replace("${targetUrl}");</script><p>Redirecting to <a href="${targetUrl}">WAYLINE Emergency Network</a>...</p></body></html>`);
+        res.end(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${targetUrl}"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>WAYLINE Emergency Network</title><style>body{font-family:sans-serif;padding:24px;text-align:center;background:#F7F3E8;color:#292D29;}a.btn{display:inline-block;margin-top:12px;padding:12px 18px;background:#292D29;color:#FFF;border-radius:8px;text-decoration:none;font-weight:bold;}</style></head><body><script>window.location.replace("${targetUrl}");</script><h2>WAYLINE Emergency Mesh</h2><p>Redirecting to <a href="${targetUrl}">WAYLINE Emergency App</a>...</p><p><a href="${chromeIntentUrl}" class="btn">Open in Chrome (Full Features & Audio)</a></p></body></html>`);
       });
 
       this.captiveHttp.on('error', (err) => {

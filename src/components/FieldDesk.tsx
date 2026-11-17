@@ -49,6 +49,9 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   onRefreshDiscovery
 }) => {
   const [showQrModal, setShowQrModal] = useState(false);
+  const [qrMode, setQrMode] = useState<'app' | 'wifi'>('app');
+  const [wifiSsid, setWifiSsid] = useState('WAYLINE_MESH');
+  const [wifiPassword, setWifiPassword] = useState('wayline123');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [selectedUrlOverride, setSelectedUrlOverride] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -84,10 +87,14 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
   const localNodeUrl = isListeningValid ? `http://${transportState.listeningAddress}` : '';
 
   useEffect(() => {
-    QRCode.toDataURL(canonicalAppUrl, { width: 220, margin: 1, color: { dark: '#292D29', light: '#F7F3E8' } })
+    const payload = qrMode === 'wifi'
+      ? `WIFI:T:WPA;S:${wifiSsid.trim()};P:${wifiPassword.trim()};;`
+      : canonicalAppUrl;
+
+    QRCode.toDataURL(payload, { width: 220, margin: 1, color: { dark: '#292D29', light: '#F7F3E8' } })
       .then(url => setQrDataUrl(url))
       .catch(err => console.error(err));
-  }, [canonicalAppUrl]);
+  }, [canonicalAppUrl, qrMode, wifiSsid, wifiPassword]);
 
   const handleCopyLink = async () => {
     try {
@@ -587,16 +594,81 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
       {/* QR Code Phone Scanner Modal */}
       {showQrModal && (
         <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 380 }}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 420 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Scan Dynamic Mesh Link</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>Field Onboarding & Quick Join</h3>
               <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginBottom: 14 }}>
-              Scan with your phone's camera on the shared Wi-Fi / hotspot to join and cache WAYLINE.
+
+            {/* Toggle Mode: Web App QR vs Wi-Fi Hotspot QR */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, background: 'var(--color-paper-card)', padding: 4, borderRadius: 6, border: '1.5px solid var(--color-ink)' }}>
+              <button
+                type="button"
+                onClick={() => setQrMode('app')}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: qrMode === 'app' ? 'var(--color-yellow)' : 'transparent',
+                  color: 'var(--color-ink)',
+                  cursor: 'pointer'
+                }}
+              >
+                1. Open WAYLINE App
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrMode('wifi')}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: qrMode === 'wifi' ? 'var(--color-yellow)' : 'transparent',
+                  color: 'var(--color-ink)',
+                  cursor: 'pointer'
+                }}
+              >
+                2. Connect Wi-Fi Hotspot
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-ink-muted)', marginBottom: 12 }}>
+              {qrMode === 'app' 
+                ? "Scan with phone camera to open WAYLINE directly in Chrome/Safari without typing URLs."
+                : "Scan with phone camera to automatically connect to the field hotspot."}
             </p>
+
+            {qrMode === 'wifi' && (
+              <div style={{ marginBottom: 12, textAlign: 'left', display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 800 }}>HOTSPOT SSID:</label>
+                  <input
+                    type="text"
+                    value={wifiSsid}
+                    onChange={(e) => setWifiSsid(e.target.value)}
+                    style={{ width: '100%', padding: '4px 6px', fontSize: '0.78rem', borderRadius: 4, border: '1px solid var(--color-ink)' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 800 }}>PASSWORD:</label>
+                  <input
+                    type="text"
+                    value={wifiPassword}
+                    onChange={(e) => setWifiPassword(e.target.value)}
+                    style={{ width: '100%', padding: '4px 6px', fontSize: '0.78rem', borderRadius: 4, border: '1px solid var(--color-ink)' }}
+                  />
+                </div>
+              </div>
+            )}
+
             {qrDataUrl && (
               <div style={{ 
                 background: '#F7F3E8', 
@@ -606,12 +678,47 @@ export const FieldDesk: React.FC<FieldDeskProps> = ({
                 display: 'inline-block',
                 boxShadow: 'var(--shadow-tactile)'
               }}>
-                <img src={qrDataUrl} alt="Application QR Code" style={{ width: 220, height: 220, display: 'block' }} />
+                <img src={qrDataUrl} alt="Quick Join QR Code" style={{ width: 220, height: 220, display: 'block' }} />
               </div>
             )}
-            <div style={{ marginTop: 14, fontSize: '0.95rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B', wordBreak: 'break-all' }}>
-              {canonicalAppUrl}
+
+            <div style={{ marginTop: 12, fontSize: '0.9rem', fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#EA644B', wordBreak: 'break-all' }}>
+              {qrMode === 'app' ? canonicalAppUrl : `SSID: ${wifiSsid}`}
             </div>
+
+            {/* PWA Home Screen Installation Guide */}
+            <div style={{
+              marginTop: 14,
+              padding: '10px 12px',
+              background: '#FFFFFF',
+              border: '1.5px solid var(--color-ink)',
+              borderRadius: 6,
+              textAlign: 'left',
+              fontSize: '0.76rem',
+              lineHeight: 1.4
+            }}>
+              <div style={{ fontWeight: 800, marginBottom: 4, color: '#0369A1' }}>
+                📲 Permanent Offline Setup (No Popups Needed):
+              </div>
+              <div>• <strong>iPhone (Safari):</strong> Tap <strong>Share (⎋)</strong> → <strong>Add to Home Screen (+)</strong></div>
+              <div>• <strong>Android (Chrome):</strong> Tap <strong>⋮ Menu</strong> → <strong>Install app / Add to Home screen</strong></div>
+              <div style={{ marginTop: 4, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>
+                Once installed on your home screen, tapping the WAYLINE icon opens full-screen offline instantly every time.
+              </div>
+            </div>
+
+            {/* Android Intent Escape Button */}
+            {typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent) && (
+              <div style={{ marginTop: 10 }}>
+                <a
+                  href={canonicalAppUrl.replace(/^http:\/\//, 'intent://') + '#Intent;scheme=http;package=com.android.chrome;end'}
+                  className="btn-tactile btn-sm"
+                  style={{ textDecoration: 'none', background: '#292D29', color: '#FFF', display: 'inline-block' }}
+                >
+                  Open in Chrome (Bypass Sandboxed Webview)
+                </a>
+              </div>
+            )}
 
             {transportState.availableInterfaces && transportState.availableInterfaces.length > 1 && (
               <div style={{ marginTop: 12, textAlign: 'left' }}>

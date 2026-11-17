@@ -1,6 +1,7 @@
 import { WaylinePacket, DiscoveredPeer, TransportState, LocalIdentity, StoredMessage, EmergencyIncident } from '../types';
 import { storage } from './storage';
 import { protocol } from './protocol';
+import { matchesBlindedRecipient } from './crypto';
 import { WebRTCTransportManager } from './transports/webrtcTransport';
 import { voiceSignaling } from './voice/voiceSignaling';
 import { voiceManager } from './voice/voiceManager';
@@ -327,30 +328,53 @@ class WaylineTransportService {
     if (this.identity && packet.senderId === this.identity.nodeId) return false; // Ignore own echoes
     if (protocol.isDuplicate(packet.id)) return false; // Deduplication drop
 
+    // Verify cryptographic authenticity (Anti-Spoofing & Signature Integrity)
+    const authResult = await protocol.verifyPacketAuthenticity(packet);
+    if (!authResult.valid) {
+      console.warn(`[Transport] Rejected untrusted/spoofed packet [${packet.id}]: ${authResult.reason}`);
+      return false;
+    }
+
     protocol.markSeen(packet.id);
     this.state.packetsReceived++;
 
-    if (packet.type === 'CHAT') {
-      const stored: StoredMessage = {
-        id: packet.id,
-        senderId: packet.senderId,
-        senderName: packet.senderName,
-        recipientId: packet.recipientId,
-        type: 'CHAT',
-        content: packet.payload?.content || '',
-        timestamp: packet.timestamp,
-        status: 'TRANSMITTED',
-        hopCount: packet.hopCount,
-        ttl: packet.ttl
-      };
-      await storage.saveMessage(stored);
-
-      // Automatically send ACK back to sender
-      if (this.identity) {
-        const ackPacket = protocol.createAckPacket(this.identity, packet);
-        this.sendPacket(ackPacket);
+    // Update peer cryptographic keys in runtime table
+    if (packet.senderPubKey) {
+      const existingPeer = this.peers.find(p => p.id === packet.senderId);
+      if (existingPeer) {
+        existingPeer.publicKey = packet.senderPubKey;
+        if (packet.ecdhPubKey) existingPeer.ecdhPublicKey = packet.ecdhPubKey;
       }
-      this.notify();
+    }
+
+    const isBroadcast = packet.recipientId === '*';
+    const isForMe = this.identity 
+      ? (packet.recipientId === this.identity.nodeId || await matchesBlindedRecipient(packet.recipientId, this.identity.nodeId))
+      : false;
+
+    if (packet.type === 'CHAT') {
+      if (isBroadcast || isForMe) {
+        const stored: StoredMessage = {
+          id: packet.id,
+          senderId: packet.senderId,
+          senderName: packet.senderName,
+          recipientId: packet.recipientId,
+          type: 'CHAT',
+          content: packet.payload?.content || '',
+          timestamp: packet.timestamp,
+          status: 'TRANSMITTED',
+          hopCount: packet.hopCount,
+          ttl: packet.ttl
+        };
+        await storage.saveMessage(stored);
+
+        // Automatically send ACK back to sender
+        if (this.identity) {
+          const ackPacket = protocol.createAckPacket(this.identity, packet);
+          this.sendPacket(ackPacket);
+        }
+        this.notify();
+      }
     } else if (packet.type === 'SOS') {
       const incident: EmergencyIncident = {
         id: packet.id,
@@ -457,6 +481,16 @@ class WaylineTransportService {
 
   // Send a packet via all available transports (WebSocket host & direct WebRTC peer channels)
   public async sendPacket(packet: WaylinePacket): Promise<void> {
+    // Ensure packet is signed with ECDSA identity before transmission
+    try {
+      const keys = await storage.getCryptoKeys();
+      if (keys?.signingPair?.privateKey && (!packet.signature || packet.signature.length === 4)) {
+        await protocol.signPacket(packet, keys.signingPair.privateKey);
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+
     this.state.packetsSent++;
     let transmittedCount = 0;
 
