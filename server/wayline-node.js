@@ -127,20 +127,28 @@ function getNetworkInterfaces() {
 
   for (const name of Object.keys(interfaces)) {
     const isVirtual = /virtual|vbox|vmware|wsl|pseudo|loopback|vethernet|hyper-v|default switch/i.test(name);
-    for (const iface of interfaces[name]) {
+    const isCellularName = /rmnet|ccmni|pdp|radio|wwan/i.test(name);
+    for (const iface of interfaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
+        const isCellularIp = iface.address.startsWith('192.0.0.') || 
+                             iface.address.startsWith('100.64.') ||
+                             iface.address.startsWith('100.');
+        const isCellular = isCellularName || isCellularIp;
         const isExcludedSubnet = iface.address.startsWith('192.168.56.') || 
                                  iface.address.startsWith('169.254.') || 
                                  iface.address.startsWith('127.');
         const isEthernetOrWifi = /ethernet|wi-fi|wlan|lan|en|eth|wireless/i.test(name);
         const isHotspotSubnet = iface.address.startsWith('192.168.137.') || 
                                 iface.address.startsWith('192.168.43.');
+        const isHotspotIface = /ap\d+|softap|rndis|swlan/i.test(name);
+        const isHotspot = isHotspotSubnet || isHotspotIface;
 
         let priority = 10;
         // Top priority for active Mobile Hotspot interface
-        if (isHotspotSubnet) priority = 150;
-        else if (isEthernetOrWifi && !isVirtual && !isExcludedSubnet) priority = 100;
-        else if (!isVirtual && !isExcludedSubnet) priority = 50;
+        if (isHotspot) priority = 150;
+        else if (isEthernetOrWifi && !isVirtual && !isExcludedSubnet && !isCellular) priority = 100;
+        else if (!isVirtual && !isExcludedSubnet && !isCellular) priority = 50;
+        else if (isCellular) priority = 0; // Exclude cellular carrier CGNAT from being primary
         else if (isExcludedSubnet || isVirtual) priority = 1;
 
         const broadcast = getBroadcastAddress(iface.address, iface.netmask);
@@ -159,7 +167,8 @@ function getNetworkInterfaces() {
   return candidates;
 }
 
-const activeInterfaces = getNetworkInterfaces();
+const allInterfaces = getNetworkInterfaces();
+const activeInterfaces = allInterfaces.filter(i => i.priority > 0);
 const primaryIface = activeInterfaces[0] || { name: 'Loopback', address: '127.0.0.1', broadcast: '255.255.255.255' };
 const LOCAL_IP = primaryIface.address;
 const IS_VERBOSE = process.argv.includes('--verbose');
@@ -1083,11 +1092,15 @@ server.listen(HTTP_PORT, '0.0.0.0', () => {
   const canonicalUrl = process.env.VITE_PUBLIC_APP_URL || (httpsServer ? `https://${LOCAL_IP}:${HTTPS_PORT}` : `http://${LOCAL_IP}:${HTTP_PORT}`);
   console.log(`\n======================================================`);
   console.log(`[WAYLINE] CANONICAL APPLICATION URL: ${canonicalUrl}`);
-  console.log(`[WAYLINE] (Open this exact URL on PC and phones to cache PWA)`);
+  console.log(`[WAYLINE] (Open this exact URL to cache PWA)`);
   console.log(`======================================================`);
-  console.log(`[WAYLINE] Local HTTP Server:         http://0.0.0.0:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Local Subnet IP:           http://${LOCAL_IP}:${HTTP_PORT}`);
-  console.log(`[WAYLINE] Zero-Config mDNS:          http://wayline.local:${HTTP_PORT}`);
+  console.log(`[WAYLINE] On this device:            http://localhost:${HTTP_PORT} (or http://127.0.0.1:${HTTP_PORT})`);
+  if (LOCAL_IP !== '127.0.0.1') {
+    console.log(`[WAYLINE] Local Subnet IP:           http://${LOCAL_IP}:${HTTP_PORT}`);
+  } else {
+    console.log(`[WAYLINE] Local Wi-Fi / Hotspot:     Not connected (Turn on Mobile Hotspot to share with nearby phones)`);
+  }
+  console.log(`[WAYLINE] Zero-Config mDNS:          http://wayline.local:${HTTP_PORT} (PC/iOS; Android requires IP/localhost)`);
   if (httpsServer) {
     console.log(`[WAYLINE] Secure HTTPS Server:       https://${LOCAL_IP}:${HTTPS_PORT} (WebRTC Voice Ready)`);
     console.log(`[WAYLINE] Root CA Certificate:       http://${LOCAL_IP}:${HTTP_PORT}/wayline-ca.crt\n`);
